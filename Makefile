@@ -189,6 +189,7 @@ $(FILES): | $(DIRS)
 	@echo "#  and can be added to the global gitignore or merged into this file.  For a more nuclear" >> .gitignore
 	@echo "#  option (not recommended) you can uncomment the following to ignore the entire idea folder." >> .gitignore
 	@echo ".idea/" >> .gitignore
+	@echo ".vscode/" >> .gitignore
 
 tree:
 	@echo "Project structure:"

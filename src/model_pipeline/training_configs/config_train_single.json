@@ -1,0 +1,24 @@
+{   
+    "train_repeat": 3,
+    "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
+
+    "data_path_train": "/home/michal-siniarski/Dokumenty/Z32/LAS/SEGM_DATA/BRIK/distributed/train.h5",
+    "data_path_test": "/home/michal-siniarski/Dokumenty/Z32/LAS/SEGM_DATA/BRIK/distributed/test.h5",
+    "data_path_val": "/home/michal-siniarski/Dokumenty/Z32/LAS/SEGM_DATA/BRIK/distributed/validation.h5",
+
+    "num_channels": 5,
+    "num_classes": 19,
+    "batch_size": 20,
+    "epochs": 100,
+    "focal_loss_gamma": 0.0,
+    "num_points": 8192,
+    "num_neighbors": 16,
+    
+    "learning_rate": 0.001,
+
+
+    "scheduler_params_comment": [],
+    "pc_start": 0.25,
+    "div_factor": 50,
+    "fin_div_factor": 1000
+}

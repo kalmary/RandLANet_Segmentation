@@ -1,0 +1,264 @@
+import torch
+from torchinfo import summary
+import torch.optim as optim
+import torch.nn as nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
+
+import torch.multiprocessing as mp
+from torch.utils.data import DataLoader
+
+from RandLANet_CB import RandLANet
+
+from model_pipeline._data_loader import *
+
+src_dir = pth.Path(__file__).parent.parent
+sys.path.append(str(src_dir))
+
+from src.utils.params_calculator import (compute_mIoU, calculate_accuracy_weighted,
+                                                         calculate_class_weights, get_dataset_len,
+                                                         FocalLoss)
+from src.utils.load_save_files import wrap_hist
+
+from typing import Optional, Generator
+from tqdm import tqdm
+
+def train_model(training_dict: dict,):
+
+    train_dataset = Dataset_RandLANet(base_dir=training_dict['data_path_train'],
+                                      num_points=training_dict['num_points'],
+                                      batch_size=training_dict['batch_size'],
+                                      shuffle=True,
+                                      device=torch.device('cpu'))
+
+    trainLoader = DataLoader(train_dataset,
+                             batch_size=None,
+                             num_workers = 14,
+                             pin_memory=False)
+
+
+    val_dataset = Dataset_RandLANet(base_dir=training_dict['data_path_val'],
+                                    num_points=training_dict['num_points'],
+                                    batch_size=training_dict['batch_size'],
+                                    shuffle=False,
+                                    device=torch.device('cpu'))
+
+    valLoader = DataLoader(val_dataset,
+                             batch_size=None,
+                             num_workers = 14,
+                             pin_memory=False)
+                             # prefetch_factor=None,
+                             # pin_memory_device='cuda')
+
+    total_t = get_dataset_len(trainLoader)
+    total_v = get_dataset_len(valLoader)
+    class_weights_t = calculate_class_weights(trainLoader, 
+                                              training_dict['num_classes'], 
+                                              total_t, 
+                                              device=torch.device('cpu'),
+                                              verbose=False)
+    class_weights_v = calculate_class_weights(valLoader,
+                                              training_dict['num_classes'],
+                                              total_v,
+                                              device=torch.device('cpu'),
+                                              verbose=False)
+
+    # train_dataset = Dataset_RandLANet(path_dir=params_dict['data_path_train'],
+    #                                   num_points=8192,
+    #                                   batch_size=batch_size,
+    #                                   shuffle=True,
+    #                                   weights=class_weights_t.cpu(),
+    #                                   device=torch.device('cpu'))
+
+
+    # trainLoader = DataLoader(train_dataset,
+    #                          batch_size=None,
+    #                          num_workers = 14,
+    #                          pin_memory=False)
+
+
+    if training_dict['model'] is None:
+        model = RandLANet(model_config=training_dict['model_config'],
+                          num_classes=training_dict['num_classes'])
+    else:
+        model = training_dict['model']
+
+    model.to(training_dict['device'])
+
+
+    criterion_t = FocalLoss(alpha=class_weights_t.cpu(),
+                            gamma=training_dict['focal_loss_gamma'],
+                            reduction='mean')
+    
+    criterion_v = FocalLoss(gamma=training_dict['focal_loss_gamma'],
+                            alpha=class_weights_v.cpu(), 
+                            reduction='mean')
+
+    optimizer = optim.AdamW(model.parameters(), lr = training_dict['learning_rate'], weight_decay=training_dict['weight_decay'])
+
+    scheduler = OneCycleLR(
+        optimizer,
+        max_lr=training_dict['learning_rate'],  # Example: Adjust based on your LR range test
+        total_steps=total_t*training_dict['epochs'],
+        pct_start=training_dict['pc_start'],  # % of steps for warm-up
+        anneal_strategy='cos',  # Cosine annealing
+        div_factor=training_dict['div_factor'],  # Initial LR will be max_lr / x
+        final_div_factor=training_dict['final_div_factor'],  # Final LR
+        cycle_momentum=True  # Cycle momentum as well
+    )
+
+    loss_hist = []
+    acc_hist = []
+    miou_hist = []
+
+    loss_v_hist = []
+    acc_v_hist = []
+    miou_v_hist = []
+
+    try:
+        repeat_pbar = tqdm(range(training_dict['train_repeat']), 
+                            desc="Training Repetition", 
+                            unit="repeat",
+                            position=1, 
+                            leave=False) 
+
+        for _ in repeat_pbar:
+
+            epoch_pbar = tqdm(range(training_dict['epochs']), 
+                                desc="Epoch Progress", 
+                                unit="epoch",
+                                position=2, 
+                                leave=False) 
+
+            for epoch in epoch_pbar:
+
+                epoch_loss_t = 0.
+                epoch_loss_v = 0.
+
+                epoch_accuracy_t = 0.
+                epoch_accuracy_v = 0.
+
+                epoch_samples_t = 0
+                epoch_samples_v = 0
+
+                epoch_miou_t = 0.
+                epoch_miou_v = 0.
+
+
+                progressbar_t = tqdm(trainLoader, 
+                                        desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
+                                        total=total_t, 
+                                        position=3,
+                                        leave=False)
+                
+                for batch_x, batch_y in progressbar_t:
+                    model.train(True)
+                    batch_x = batch_x.to(training_dict['device'])
+                    outputs = model(batch_x)
+
+                    outputs = outputs.cpu()
+                    batch_y = batch_y.cpu()
+
+                    loss_t = criterion_t(outputs, batch_y)
+
+                    optimizer.zero_grad()
+                    loss_t.backward()
+                    optimizer.step()
+
+                    try:
+                        scheduler.step()
+                    except Exception:
+                        pass
+
+                    accuracy_t = calculate_accuracy_weighted(outputs, batch_y,
+                                                                num_classes=training_dict['num_classes'])
+                    mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+
+                    current_lr = optimizer.param_groups[0]['lr']
+
+                    epoch_loss_t += loss_t.item() * batch_y.size(0)
+                    epoch_accuracy_t += accuracy_t * batch_y.size(0)
+                    epoch_miou_t += mIoU * batch_y.size(0)
+                    epoch_samples_t += batch_y.size(0)
+
+                    avg_loss_t = epoch_loss_t / epoch_samples_t
+                    avg_accuracy_t = epoch_accuracy_t / epoch_samples_t
+                    avg_miou_t = epoch_miou_t / epoch_samples_t
+
+                    progressbar_t.set_postfix({
+                        "Loss_train": f"{avg_loss_t:.6f}",
+                        "Acc_train": f"{avg_accuracy_t:.6f}",
+                        "mIoU_train": f"{avg_miou_t:.6f}",
+                        "learning_rate": f"{current_lr:.10f}"
+                    })
+
+                loss_hist.append(avg_loss_t)
+                acc_hist.append(avg_accuracy_t)
+                miou_hist.append(avg_miou_t)
+
+                progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
+                with torch.no_grad():
+                    for batch_x, batch_y in progressbar_v:
+                        model.eval()
+                        batch_x = batch_x.to(training_dict['device'])
+                        outputs = model(batch_x)
+
+                        outputs = outputs.cpu()
+                        batch_y = batch_y.cpu()
+
+                        loss_v = criterion_v(outputs, batch_y)
+
+                        accuracy_v = calculate_accuracy_weighted(outputs, batch_y, 
+                                                                    num_classes=training_dict['num_classes'])
+                        mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+
+
+                        epoch_loss_v += loss_v.item() * batch_y.size(0)
+                        epoch_accuracy_v += accuracy_v * batch_y.size(0)
+                        epoch_miou_v += mIoU * batch_y.size(0)
+                        epoch_samples_v += batch_y.size(0)
+
+                        avg_loss_v = epoch_loss_v / epoch_samples_v
+                        avg_accuracy_v = epoch_accuracy_v / epoch_samples_v
+                        avg_miou_v = epoch_miou_v / epoch_samples_v
+
+                        progressbar_v.set_postfix({
+                            "Loss_val": f"{avg_loss_v:.6f}",
+                            "Acc_val": f"{avg_accuracy_v:.6f}",
+                            "mIoU_val": f"{avg_miou_v:.6f}"
+                        })
+
+                loss_v_hist.append(avg_loss_v)
+                acc_v_hist.append(avg_accuracy_v)
+                miou_v_hist.append(avg_miou_v)
+
+                # early_stopping.check_early_stop(loss_v_hist[-1])
+
+                hist_dict = wrap_hist(acc_hist = acc_hist,
+                                        loss_hist = loss_hist,
+                                        miou_hist = miou_hist,
+                                        acc_v_hist = acc_v_hist,
+                                        loss_v_hist = loss_v_hist,
+                                        miou_v_hist = miou_v_hist)
+
+                yield model, hist_dict
+
+
+                epoch_pbar.set_postfix({
+                    "Loss_train": f"{avg_loss_t:.6f}",
+                    "Acc_train": f"{avg_accuracy_t:.6f}",
+                    "Loss_val": f"{avg_loss_v:.6f}",
+                    "Acc_val": f"{avg_accuracy_v:.6f}",
+                    "learning_rate_max": f"{training_dict['learning_rate']:.10f}"
+                })
+
+                # if early_stopping.stop_training:
+                #     break
+
+    except Exception as e:
+        print(f"Error during training: {e}")
+        try:
+            del model
+        except Exception as e:
+            pass
+        torch.cuda.empty_cache()
+        yield None, {}
