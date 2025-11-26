@@ -1,6 +1,3 @@
 [submodule "src/utils/nn_utils"]
 	path = src/utils/nn_utils
 	url = https://github.com/kalmary/nn_utils.git
-[submodule "src/utils/src/utils/nn_utils"]
-	path = src/utils/src/utils/nn_utils
-	url = https://github.com/kalmary/nn_utils.git
