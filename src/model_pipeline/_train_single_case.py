@@ -14,17 +14,15 @@ from model_pipeline._data_loader import *
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from src.utils.params_calculator import (compute_mIoU, calculate_accuracy_weighted,
-                                                         calculate_class_weights, get_dataset_len,
-                                                         FocalLoss)
-from src.utils.load_save_files import wrap_hist
+from src.utils import compute_mIoU, calculate_weighted_accuracy
+from src.utils import calculate_class_weights, get_dataset_len, LabelSmoothingFocalLoss
+from src.utils import wrap_hist
 
-from typing import Optional, Generator
 from tqdm import tqdm
 
 def train_model(training_dict: dict,):
 
-    train_dataset = Dataset_RandLANet(base_dir=training_dict['data_path_train'],
+    train_dataset = Dataset(base_dir=training_dict['data_path_train'],
                                       num_points=training_dict['num_points'],
                                       batch_size=training_dict['batch_size'],
                                       shuffle=True,
@@ -36,7 +34,7 @@ def train_model(training_dict: dict,):
                              pin_memory=False)
 
 
-    val_dataset = Dataset_RandLANet(base_dir=training_dict['data_path_val'],
+    val_dataset = Dataset(base_dir=training_dict['data_path_val'],
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
                                     shuffle=False,
@@ -46,8 +44,6 @@ def train_model(training_dict: dict,):
                              batch_size=None,
                              num_workers = 14,
                              pin_memory=False)
-                             # prefetch_factor=None,
-                             # pin_memory_device='cuda')
 
     total_t = get_dataset_len(trainLoader)
     total_v = get_dataset_len(valLoader)
@@ -62,19 +58,6 @@ def train_model(training_dict: dict,):
                                               device=torch.device('cpu'),
                                               verbose=False)
 
-    # train_dataset = Dataset_RandLANet(path_dir=params_dict['data_path_train'],
-    #                                   num_points=8192,
-    #                                   batch_size=batch_size,
-    #                                   shuffle=True,
-    #                                   weights=class_weights_t.cpu(),
-    #                                   device=torch.device('cpu'))
-
-
-    # trainLoader = DataLoader(train_dataset,
-    #                          batch_size=None,
-    #                          num_workers = 14,
-    #                          pin_memory=False)
-
 
     if training_dict['model'] is None:
         model = RandLANet(model_config=training_dict['model_config'],
@@ -85,13 +68,13 @@ def train_model(training_dict: dict,):
     model.to(training_dict['device'])
 
 
-    criterion_t = FocalLoss(alpha=class_weights_t.cpu(),
-                            gamma=training_dict['focal_loss_gamma'],
-                            reduction='mean')
+    criterion_t = LabelSmoothingFocalLoss(alpha=class_weights_t.cpu(),
+                                          gamma=training_dict['focal_loss_gamma'],
+                                          reduction='mean') # TODO double check - Labels smoothing is good for better generalization, but exact impact must be investigated
     
-    criterion_v = FocalLoss(gamma=training_dict['focal_loss_gamma'],
-                            alpha=class_weights_v.cpu(), 
-                            reduction='mean')
+    criterion_v = LabelSmoothingFocalLoss(gamma=training_dict['focal_loss_gamma'],
+                                          alpha=class_weights_v.cpu(),
+                                          reduction='mean')
 
     optimizer = optim.AdamW(model.parameters(), lr = training_dict['learning_rate'], weight_decay=training_dict['weight_decay'])
 
@@ -169,8 +152,8 @@ def train_model(training_dict: dict,):
                     except Exception:
                         pass
 
-                    accuracy_t = calculate_accuracy_weighted(outputs, batch_y,
-                                                                num_classes=training_dict['num_classes'])
+                    accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
+                    
                     mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
 
                     current_lr = optimizer.param_groups[0]['lr']
@@ -207,8 +190,8 @@ def train_model(training_dict: dict,):
 
                         loss_v = criterion_v(outputs, batch_y)
 
-                        accuracy_v = calculate_accuracy_weighted(outputs, batch_y, 
-                                                                    num_classes=training_dict['num_classes'])
+                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v)
+
                         mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
 
 

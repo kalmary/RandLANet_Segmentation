@@ -13,8 +13,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from utils_universal.training_tools import rotate_points, tilt_points, transform_points
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from utils.pcd_manipulation import rotate_points, tilt_points, transform_points
+
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)

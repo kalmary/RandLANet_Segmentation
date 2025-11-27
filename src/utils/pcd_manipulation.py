@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import fpsample
+import random
 
 def rotate_points(points: torch.Tensor, device = torch.device('cpu')) -> torch.Tensor:
     """
@@ -138,3 +140,73 @@ def transform_points(
     ], dtype=dtype).to(device)
     points = points @ rotation_matrix.T
     return points
+
+
+def voxelGridFragmentation(data,
+                           voxel_size: np.array = np.array([25., 25.]),
+                           num_points = 0,
+                           overlap_ratio: float = 0.4,
+                           shuffle: bool = False):
+    
+    """
+    Voxel grid fragmentation of a point cloud.
+
+    Args:
+        data (np.ndarray): The input point cloud data.
+        voxel_size (np.array): The size of each voxel.
+        num_points (int): The number of points to sample in each voxel - if 0, returns all indices
+        overlap_ratio (float): The overlap ratio between voxels.
+        shuffle (bool): Whether to shuffle the voxel coordinates.
+
+    Yields:
+        tuple: A tuple containing:
+            - np.ndarray: The indices of the sampled points.
+            - bool: Whether the sampled points are noise or not.
+    
+    """
+
+    min_xyz = data.min(axis=0)
+    max_xyz = data.max(axis=0)
+    stride = voxel_size * (1 - overlap_ratio)
+
+    x_range = np.arange(min_xyz[0], max_xyz[0], stride[0])
+    y_range = np.arange(min_xyz[1], max_xyz[1], stride[1])
+
+    if shuffle:
+        random.shuffle(x_range)
+        random.shuffle(y_range)
+
+    voxel_coords = [(x, y) for x in x_range for y in y_range]
+
+    # Precompute all voxel bounding boxes
+    for (x, y) in voxel_coords:
+        lower = np.array([x, y])
+        upper = lower + voxel_size
+
+        mask = np.all((data[:, :2] >= lower) & (data[:, :2] <= upper), axis=1)
+        indices = np.where(mask)[0]
+
+        sampled_idx = indices
+
+        noise = False
+
+        if indices.shape[0] == 0:
+            continue
+
+        if num_points == 0:
+            yield sampled_idx, noise
+
+        elif indices.shape[0] < num_points // 4:
+            noise = True
+
+        elif num_points // 4 <= indices.shape[0] < num_points:
+            sampled_idx = np.random.choice(a = indices, size = num_points, replace=True)
+
+        elif indices.shape[0] == num_points:
+            pass
+
+        elif indices.shape[0] > num_points:
+            sampled_idx = fpsample.bucket_fps_kdline_sampling(data[indices], num_points, h=7)
+            sampled_idx = indices[sampled_idx]  # Map back to original indices
+
+        yield sampled_idx, noise

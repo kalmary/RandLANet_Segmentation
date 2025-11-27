@@ -26,12 +26,10 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from _train_single_case import train_model
-from src.utils.load_save_files import load_json, save2json, save_model, load_model, convert_str_values
-from src.utils.evaluationTools import Plotter
+from src.utils import load_json, save2json, save_model, convert_str_values
+from src.utils import Plotter
 
 from RandLANet_CB import RandLANet
-
-
 
 
 def check_models(model_configs_paths: list[pth.Path],
@@ -617,20 +615,6 @@ def argparser():
         )
     )
 
-
-        # Flag definition
-    parser.add_argument(
-        '--TL',
-        type=bool,
-        default='False',
-        choices=[False, True], # choice limit
-        help=(
-            "Use pretrained model for current model.\n" 
-            "If True, you will be asked for model_name.\n"
-            "New model will be saved as 'model_name_TL'.pt"
-        )
-    )
-
     parser.add_argument(
         '--mode',
         type=int,
@@ -653,6 +637,7 @@ def argparser():
 def main():
     multiprocessing.set_start_method('spawn', force=True)
     args = argparser()
+
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     log_dir = pth.Path(__file__).parent.joinpath('logs')
@@ -676,13 +661,10 @@ def main():
     logger.addHandler(file_handler)
 
     logger.info(f"PROGRAM START: {args.model_name}")
-    logger.info(f"MODE: {args.mode}, TL: {args.TL}")
 
 
     device = args.device.lower()
     model_name = args.model_name
-    if args.TL:
-        model_name = f'{model_name}_TL'
 
     base_path = pth.Path(__file__).parent
     if args.mode != 4:
@@ -706,11 +688,7 @@ def main():
                      max_memory_GB=20,
                      verbose=True)
 
-        
 
-
-    
-    
 if __name__ == '__main__':
     
     main()  

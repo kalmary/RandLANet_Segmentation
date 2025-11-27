@@ -40,13 +40,11 @@ def knn(src, tgt, k):
     distances = torch.cdist(tgt, src)
 
     # Find the k nearest neighbors and their distances
-    # dist will contain the actual Euclidean distances
-    # idx will contain the indices of these k neighbors
     dist, idx = torch.topk(distances, k=k, dim=-1, largest=False)
 
     return idx, dist
 
-def input_norm(input: torch.Tensor, max_voxel_dim = 20., max_intensity = 10.):
+def input_norm(input: torch.Tensor, max_voxel_dim = 20.):
     max_voxel_dim /= 2
 
     coords = input[..., :3]
@@ -54,8 +52,6 @@ def input_norm(input: torch.Tensor, max_voxel_dim = 20., max_intensity = 10.):
 
     coords -= coords.mean(dim=1, keepdim=True)
     coords /= max_voxel_dim
-
-    intensity /= max_intensity
 
     input = torch.cat((coords, intensity.unsqueeze(-1)), dim=-1)
 
@@ -242,6 +238,8 @@ class RandLANet(nn.Module):
         self._num_neighbors_upsample = 3
 
         self.decimation = model_config.get('decimation')
+
+        self.max_voxel_dim = model_config.get('max_voxel_dim')
         
         # Get encoder and decoder layer configurations
         encoder_layers = model_config.get('encoder_layers')
@@ -330,7 +328,7 @@ class RandLANet(nn.Module):
         d = self.decimation
         N = input.shape[1]
 
-        input = input_norm(input)
+        input = input_norm(input, max_voxel_dim=self.max_voxel_dim)
 
         coords = input[..., :3]
 
@@ -400,20 +398,9 @@ class RandLANet(nn.Module):
 
         return scores.squeeze(-1)
     
-def plot_cloud(cloud: torch.tensor, title: Optional[str]):
-    import open3d as o3d
-    import numpy as np
 
 
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(cloud)
-
-    o3d.visualization.draw_geometries([pcd])
-
-
-if __name__ == '__main__':
-    # Example: Using config dict directly
-
+def test_model():
     model_config = {
         'd_in': 4,
         'num_neighbors': 16,
@@ -438,7 +425,8 @@ if __name__ == '__main__':
         'fc_end': {
             'layers': [64, 32],
             'dropout': 0.5
-        }
+        },
+        'max_voxel_dim': 25
     }
     
     batch_size = 15
@@ -459,3 +447,5 @@ if __name__ == '__main__':
     assert output.shape == expected_output_shape, f"Expected shape: {expected_output_shape}, received: {output.shape}"
 
     print(f"Success! Output shape: {output.shape}, expected: {expected_output_shape}")
+
+    

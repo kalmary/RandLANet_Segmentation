@@ -5,7 +5,7 @@ import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 import pathlib as pth
 
-from model_pipeline._data_loader import Dataset_RandLANet
+from _data_loader import Dataset_RandLANet
 
 import os
 import sys
@@ -20,14 +20,12 @@ parent_dir = os.path.dirname(current_dir)
 
 sys.path.append(parent_dir)
 
-from utils_universal.evaluationTools import Plotter, ClassificationReport
+from utils.nn_utils.src.evaluation_plot_tools import Plotter, ClassificationReport
 
-from utils_universal.load_save_files import load_json, load_model
-from utils_universal.params_calculator import calculate_accuracy, compute_mIoU, get_Probabilities, \
-    get_intLabels, calculate_accuracy_weighted, calculate_class_weights, get_dataset_len, FocalLoss, DiceLoss, IoULoss, \
+# from utils_universal.load_save_files import load_json, load_model
+from utils.nn_utils.src.accuracy_metrics import calculate_accuracy, compute_mIoU, get_Probabilities, \
+    get_intLabels, calculate_accuracy_weighted, calculate_class_weights, get_dataset_len, FocalLoss, DiceLoss, \
     compute_mIoU_from_flat
-import open3d as o3d
-
 from tqdm import tqdm
 
 def dummy_data4warmup(input_dim: int, n_classes: int):
@@ -88,13 +86,6 @@ def eval_model():
 
     alpha_f = 0.6
     alpha_d = 0.1
-    alpha_trip = 0.3
-
-    criterion_ft = FocalLoss(alpha=class_weights.cpu(), gamma=2.).cpu()
-    # criterion_fv = FocalLoss(alpha=class_weights.cpu(), gamma=2.).cpu()
-
-    criterion_dt = DiceLoss(params_dict['num_classes'], class_weights.cpu()).cpu()
-    # criterion_dv = DiceLoss(params_dict['num_classes']).cpu()
 
     #warmup
     data, label = dummy_data4warmup(params_dict['input_dim'], params_dict['num_classes'])
@@ -133,13 +124,8 @@ def eval_model():
 
             loss_v = (criterion_ft(outputs, batch_y) * alpha_f
                       + criterion_dt(outputs, batch_y) * alpha_d)
-                      # + triplet_loss * alpha_trip)
-
+            
             accuracy_v = calculate_accuracy_weighted(outputs, batch_y, params_dict['num_classes'])
-
-            # miou_v, IoU_pc = compute_mIoU(torch.argmax(outputs, dim=1),
-            #                                         batch_y.flatten(),
-            #                                         params_dict['num_classes'])
 
             epoch_loss += loss_v.item() * batch_y.size(0)
             epoch_accuracy += accuracy_v * batch_y.size(0)
