@@ -24,6 +24,7 @@ from tqdm import tqdm
 
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
+print(src_dir)
 
 from _train_single_case import train_model
 from src.utils import load_json, save2json, save_model, convert_str_values
