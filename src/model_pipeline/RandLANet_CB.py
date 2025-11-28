@@ -448,4 +448,5 @@ def test_model():
 
     print(f"Success! Output shape: {output.shape}, expected: {expected_output_shape}")
 
-    
+if __name__ == '__main__':
+    test_model()
