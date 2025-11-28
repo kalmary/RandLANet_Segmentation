@@ -98,151 +98,151 @@ def train_model(training_dict: dict,):
     acc_v_hist = []
     miou_v_hist = []
 
-    try:
-        repeat_pbar = tqdm(range(training_dict['train_repeat']), 
-                            desc="Training Repetition", 
-                            unit="repeat",
-                            position=1, 
+    # try:
+    repeat_pbar = tqdm(range(training_dict['train_repeat']), 
+                        desc="Training Repetition", 
+                        unit="repeat",
+                        position=1, 
+                        leave=False) 
+
+    for _ in repeat_pbar:
+
+        epoch_pbar = tqdm(range(training_dict['epochs']), 
+                            desc="Epoch Progress", 
+                            unit="epoch",
+                            position=2, 
                             leave=False) 
 
-        for _ in repeat_pbar:
+        for epoch in epoch_pbar:
 
-            epoch_pbar = tqdm(range(training_dict['epochs']), 
-                                desc="Epoch Progress", 
-                                unit="epoch",
-                                position=2, 
-                                leave=False) 
+            epoch_loss_t = 0.
+            epoch_loss_v = 0.
 
-            for epoch in epoch_pbar:
+            epoch_accuracy_t = 0.
+            epoch_accuracy_v = 0.
 
-                epoch_loss_t = 0.
-                epoch_loss_v = 0.
+            epoch_samples_t = 0
+            epoch_samples_v = 0
 
-                epoch_accuracy_t = 0.
-                epoch_accuracy_v = 0.
-
-                epoch_samples_t = 0
-                epoch_samples_v = 0
-
-                epoch_miou_t = 0.
-                epoch_miou_v = 0.
+            epoch_miou_t = 0.
+            epoch_miou_v = 0.
 
 
-                progressbar_t = tqdm(trainLoader, 
-                                        desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
-                                        total=total_t, 
-                                        position=3,
-                                        leave=False)
+            progressbar_t = tqdm(trainLoader, 
+                                    desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
+                                    total=total_t, 
+                                    position=3,
+                                    leave=False)
+            
+            for batch_x, batch_y in progressbar_t:
+                model.train(True)
+                batch_x = batch_x.to(training_dict['device'])
+                outputs = model(batch_x)
+
+                outputs = outputs.cpu()
+                batch_y = batch_y.cpu()
+
+                loss_t = criterion_t(outputs, batch_y)
+
+                optimizer.zero_grad()
+                loss_t.backward()
+                optimizer.step()
+
+                try:
+                    scheduler.step()
+                except Exception:
+                    pass
+
+                accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
                 
-                for batch_x, batch_y in progressbar_t:
-                    model.train(True)
+                mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+
+                current_lr = optimizer.param_groups[0]['lr']
+
+                epoch_loss_t += loss_t.item() * batch_y.size(0)
+                epoch_accuracy_t += accuracy_t * batch_y.size(0)
+                epoch_miou_t += mIoU * batch_y.size(0)
+                epoch_samples_t += batch_y.size(0)
+
+                avg_loss_t = epoch_loss_t / epoch_samples_t
+                avg_accuracy_t = epoch_accuracy_t / epoch_samples_t
+                avg_miou_t = epoch_miou_t / epoch_samples_t
+
+                progressbar_t.set_postfix({
+                    "Loss_train": f"{avg_loss_t:.6f}",
+                    "Acc_train": f"{avg_accuracy_t:.6f}",
+                    "mIoU_train": f"{avg_miou_t:.6f}",
+                    "learning_rate": f"{current_lr:.10f}"
+                })
+
+            loss_hist.append(avg_loss_t)
+            acc_hist.append(avg_accuracy_t)
+            miou_hist.append(avg_miou_t)
+
+            progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
+            with torch.no_grad():
+                for batch_x, batch_y in progressbar_v:
+                    model.eval()
                     batch_x = batch_x.to(training_dict['device'])
                     outputs = model(batch_x)
 
                     outputs = outputs.cpu()
                     batch_y = batch_y.cpu()
 
-                    loss_t = criterion_t(outputs, batch_y)
+                    loss_v = criterion_v(outputs, batch_y)
 
-                    optimizer.zero_grad()
-                    loss_t.backward()
-                    optimizer.step()
+                    accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v)
 
-                    try:
-                        scheduler.step()
-                    except Exception:
-                        pass
-
-                    accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
-                    
                     mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
 
-                    current_lr = optimizer.param_groups[0]['lr']
 
-                    epoch_loss_t += loss_t.item() * batch_y.size(0)
-                    epoch_accuracy_t += accuracy_t * batch_y.size(0)
-                    epoch_miou_t += mIoU * batch_y.size(0)
-                    epoch_samples_t += batch_y.size(0)
+                    epoch_loss_v += loss_v.item() * batch_y.size(0)
+                    epoch_accuracy_v += accuracy_v * batch_y.size(0)
+                    epoch_miou_v += mIoU * batch_y.size(0)
+                    epoch_samples_v += batch_y.size(0)
 
-                    avg_loss_t = epoch_loss_t / epoch_samples_t
-                    avg_accuracy_t = epoch_accuracy_t / epoch_samples_t
-                    avg_miou_t = epoch_miou_t / epoch_samples_t
+                    avg_loss_v = epoch_loss_v / epoch_samples_v
+                    avg_accuracy_v = epoch_accuracy_v / epoch_samples_v
+                    avg_miou_v = epoch_miou_v / epoch_samples_v
 
-                    progressbar_t.set_postfix({
-                        "Loss_train": f"{avg_loss_t:.6f}",
-                        "Acc_train": f"{avg_accuracy_t:.6f}",
-                        "mIoU_train": f"{avg_miou_t:.6f}",
-                        "learning_rate": f"{current_lr:.10f}"
+                    progressbar_v.set_postfix({
+                        "Loss_val": f"{avg_loss_v:.6f}",
+                        "Acc_val": f"{avg_accuracy_v:.6f}",
+                        "mIoU_val": f"{avg_miou_v:.6f}"
                     })
 
-                loss_hist.append(avg_loss_t)
-                acc_hist.append(avg_accuracy_t)
-                miou_hist.append(avg_miou_t)
+            loss_v_hist.append(avg_loss_v)
+            acc_v_hist.append(avg_accuracy_v)
+            miou_v_hist.append(avg_miou_v)
 
-                progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
-                with torch.no_grad():
-                    for batch_x, batch_y in progressbar_v:
-                        model.eval()
-                        batch_x = batch_x.to(training_dict['device'])
-                        outputs = model(batch_x)
+            # early_stopping.check_early_stop(loss_v_hist[-1])
 
-                        outputs = outputs.cpu()
-                        batch_y = batch_y.cpu()
+            hist_dict = wrap_hist(acc_hist = acc_hist,
+                                    loss_hist = loss_hist,
+                                    miou_hist = miou_hist,
+                                    acc_v_hist = acc_v_hist,
+                                    loss_v_hist = loss_v_hist,
+                                    miou_v_hist = miou_v_hist)
 
-                        loss_v = criterion_v(outputs, batch_y)
-
-                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v)
-
-                        mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+            yield model, hist_dict
 
 
-                        epoch_loss_v += loss_v.item() * batch_y.size(0)
-                        epoch_accuracy_v += accuracy_v * batch_y.size(0)
-                        epoch_miou_v += mIoU * batch_y.size(0)
-                        epoch_samples_v += batch_y.size(0)
-
-                        avg_loss_v = epoch_loss_v / epoch_samples_v
-                        avg_accuracy_v = epoch_accuracy_v / epoch_samples_v
-                        avg_miou_v = epoch_miou_v / epoch_samples_v
-
-                        progressbar_v.set_postfix({
-                            "Loss_val": f"{avg_loss_v:.6f}",
-                            "Acc_val": f"{avg_accuracy_v:.6f}",
-                            "mIoU_val": f"{avg_miou_v:.6f}"
-                        })
-
-                loss_v_hist.append(avg_loss_v)
-                acc_v_hist.append(avg_accuracy_v)
-                miou_v_hist.append(avg_miou_v)
-
-                # early_stopping.check_early_stop(loss_v_hist[-1])
-
-                hist_dict = wrap_hist(acc_hist = acc_hist,
-                                        loss_hist = loss_hist,
-                                        miou_hist = miou_hist,
-                                        acc_v_hist = acc_v_hist,
-                                        loss_v_hist = loss_v_hist,
-                                        miou_v_hist = miou_v_hist)
-
-                yield model, hist_dict
-
-
-                epoch_pbar.set_postfix({
-                    "Loss_train": f"{avg_loss_t:.6f}",
-                    "Acc_train": f"{avg_accuracy_t:.6f}",
-                    "Loss_val": f"{avg_loss_v:.6f}",
-                    "Acc_val": f"{avg_accuracy_v:.6f}",
-                    "learning_rate_max": f"{training_dict['learning_rate']:.10f}"
-                })
+            epoch_pbar.set_postfix({
+                "Loss_train": f"{avg_loss_t:.6f}",
+                "Acc_train": f"{avg_accuracy_t:.6f}",
+                "Loss_val": f"{avg_loss_v:.6f}",
+                "Acc_val": f"{avg_accuracy_v:.6f}",
+                "learning_rate_max": f"{training_dict['learning_rate']:.10f}"
+            })
 
                 # if early_stopping.stop_training:
                 #     break
 
-    except Exception as e:
-        print(f"Error during training: {e}")
-        try:
-            del model
-        except Exception as e:
-            pass
-        torch.cuda.empty_cache()
-        yield None, {}
+    # except Exception as e:
+    #     print(f"Error during training: {e}")
+    #     try:
+    #         del model
+    #     except Exception as e:
+    #         pass
+    #     torch.cuda.empty_cache()
+    #     yield None, {}
