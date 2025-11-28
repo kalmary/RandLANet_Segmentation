@@ -94,11 +94,12 @@ def get_factor_list(param_value_list: list[Union[float]]) -> list[Union[float]]:
     
     num = start
     while num > stop:
-        print(num)
+
         factor_list.append(num)
         num *= factor
 
-    return factor_list.sort()
+    factor_list.sort()
+    return factor_list
 
     
 
@@ -123,7 +124,7 @@ def generate_experiment_configs(training_config: dict,
         
         elif isinstance(value, list) and len(value) > 1 and not 'samples_len' in key.lower():
             if "learning_rate" in key.lower() or "weight_decay" in key.lower():
-                
+                print('test0')
                 dynamic_params[key] = get_factor_list(training_config[key])
             else:
                 dynamic_params[key] = get_step_list(value)
