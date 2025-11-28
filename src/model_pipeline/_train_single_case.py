@@ -14,9 +14,9 @@ from _data_loader import *
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from src.utils import compute_mIoU, calculate_weighted_accuracy
-from src.utils import calculate_class_weights, get_dataset_len, LabelSmoothingFocalLoss
-from src.utils import wrap_hist
+from utils import compute_mIoU, calculate_weighted_accuracy
+from utils import calculate_class_weights, get_dataset_len, LabelSmoothingFocalLoss
+from utils import wrap_hist
 
 from tqdm import tqdm
 
