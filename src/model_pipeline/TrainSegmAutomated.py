@@ -124,7 +124,6 @@ def generate_experiment_configs(training_config: dict,
         
         elif isinstance(value, list) and len(value) > 1 and not 'samples_len' in key.lower():
             if "learning_rate" in key.lower() or "weight_decay" in key.lower():
-                print('test0')
                 dynamic_params[key] = get_factor_list(training_config[key])
             else:
                 dynamic_params[key] = get_step_list(value)
@@ -412,7 +411,6 @@ def objective_function(trial: optuna.Trial,
     batch_size = get_step_list(exp_config['batch_size'])
     epochs = get_step_list(exp_config['epochs'])
 
-    print(get_factor_list(exp_config['learning_rate']))
     lr = trial.suggest_categorical('learning_rate', get_factor_list(exp_config['learning_rate']))
     weight_decay = trial.suggest_categorical('weight_decay', get_factor_list(exp_config['weight_decay']))
 
