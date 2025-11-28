@@ -20,5 +20,6 @@
     "fc_end": {
       "layers": [24, 16],
       "dropout": 0.4
-    }
+    },
+    "max_voxel_dim": 20
   }
