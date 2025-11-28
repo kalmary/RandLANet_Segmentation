@@ -202,7 +202,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
     if mode == 0 or mode == 1:
         training_config = load_json(config_files_dir.joinpath('config_train_single.json'))
     elif mode == 2 or mode == 3:
-        print(config_files_dir.joinpath('config_train.json''))
+        print(config_files_dir.joinpath('config_train.json))
         training_config = load_json(config_files_dir.joinpath('config_train.json'))
     
     logger.info(f'Loaded training config for mode: {mode}.')
