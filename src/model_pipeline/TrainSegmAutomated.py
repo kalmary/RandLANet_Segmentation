@@ -27,8 +27,8 @@ sys.path.append(str(src_dir))
 print(src_dir)
 
 from _train_single_case import train_model
-from src.utils import load_json, save2json, save_model, convert_str_values
-from src.utils import Plotter
+from utils import load_json, save2json, save_model, convert_str_values
+from utils import Plotter
 
 from RandLANet_CB import RandLANet
 
