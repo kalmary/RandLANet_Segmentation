@@ -69,12 +69,14 @@ pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https
 
 For training purposes:
 
+
 ```bash
 cd src/model_pipeline
 python TrainSegmAutomated.py --help
 ```
 
 Output of --help
+
 
 ```
 Script for training the model based on predefined range of scenarios
@@ -98,7 +100,8 @@ options:
                         4: only check models
 ```
 
-**Training mode:**
+Training mode:
+
 * **Test** - This mode uses a dummy model to check if the overall system and configuration are working correctly.
 * **Single training** - Performs a single training run using a specified model and defined configuration settings.
 * **Multiple training grid_based** - Executes multiple training runs for hyperparameter tuning by systematically testing all combinations defined in a grid search configuration.
@@ -107,6 +110,25 @@ options:
 
 ---
 
+For evaluating:
+
+
+```bash
+cd src/model_pipeline
+python EvalSegm_RandLANet.py --help
+```
+Output of --help
+
+```bash
+
+```
+
+
+---
+
 ### 4. Main piplines after training <a name="piplines"></a>
 
 
+| Pipline for processing point clouds in arrays | Pipline for processing laz files |
+| :---: | :---: |
+| Using main.py.... | Opis 2 |
