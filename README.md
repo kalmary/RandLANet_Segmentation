@@ -5,11 +5,11 @@
 
 ---
 
-# Table of contents
+### Table of contents
 1. [Instalation](#instalation)
 2. [Folder Structure](#fstructure)
 3. [Usage](#usage)
-4. [Main piplines After training](#piplines)
+4. [Main piplines after training](#piplines)
 
 
 ---
@@ -74,6 +74,38 @@ cd model_pipeline
 python TrainSegmAutomated.py --help
 ```
 
+Output of --help
 
+```
+Script for training the model based on predefined range of scenarios
+
+options:
+  -h, --help            show this help message and exit
+  --model_name MODEL_NAME
+                        Base of the model's name.
+                        When iterating, name also gets an ID. 
+                        If not given, defaults to: ResNet_0.
+  --device {cpu,cuda,gpu}
+                        Device for tensor based computation.
+                        Pick 'cpu' or 'cuda'/ 'gpu'.
+                        Device for tensor based computation.
+  --mode {0,1,2,3,4}    
+                        Pick:
+                        0: test
+                        1: single training
+                        2: multiple trainings, grid_based
+                        3: multiple trainings, with optuna
+                        4: only check models
+```
+
+**Training mode:**
+* **Test** - This mode uses a dummy model to check if the overall system and configuration are working correctly.
+* **Single training** - Performs a single training run using a specified model and defined configuration settings.
+* **Multiple training grid_based** - Executes multiple training runs for hyperparameter tuning by systematically testing all combinations defined in a grid search configuration.
+* **Multiple training optuna** - Performs advanced hyperparameter optimization using Optuna. This mode can efficiently find a better optimal solution, often taking more time than a simple grid search. You can also utilize the Optuna Dashboard for visualization and monitoring.
+* **Only check models** - This mode check if model compiles.
+
+---
 
 ### 4. Main piplines after training <a name="piplines"></a>
+
