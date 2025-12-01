@@ -9,12 +9,12 @@
 1. [Instalation](#instalation)
 2. [Folder Structure](#fstructure)
 3. [Usage](#usage)
-
+4. [Main piplines After training](#piplines)
 
 
 ---
 
-### Instalation:  <a name="instalation"></a>
+### 1.Instalation:  <a name="instalation"></a>
 
 ```bash
 
@@ -40,7 +40,7 @@ pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https
 
 ---
 
-### Folder structure <a name="fstructure"></a>
+### 2.Folder structure <a name="fstructure"></a>
 
 ```
 .
@@ -63,4 +63,17 @@ pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https
 
 ```
 
-### Usage <a name="usage"></a>
+### 3.Usage <a name="usage"></a>
+
+---
+
+For training purposes:
+
+```bash
+cd model_pipeline
+python TrainSegmAutomated.py --help
+```
+
+
+
+### 4. Main piplines after training <a name="piplines"></a>
