@@ -31,6 +31,7 @@ class SegmentClass:
         self.pbar = pbar
 
         self._scaler = None
+        self._model_name = None
         self._model_config = None
         self._model = None
 
@@ -38,17 +39,18 @@ class SegmentClass:
     # TODO adjust model loading 
     def _load_config(self, config_path: pth.Path) -> dict:
         config_dict = load_json(config_path)
+        self._model_name: str = config_path.stem.replace('_config.json', '.pt') # assumes model_name and config_model have analogous name
         self._model_config: dict = config_dict['model_config']
         self.voxel_size_small: float = self.model_config['max_voxel_dim']
 
         return config_dict
 
-    def _load_segmModel(self, path2model) -> nn.Module:
+    def _load_segmModel(self, model_dir = "./final_files") -> nn.Module:
+        path2model = pth.Path(model_dir).joinpath(self._model_name)
         model = RandLANet.from_config_file(self._model_config, self._model_config['num_classes'])
-        self._model: nn.Module = load_model(file_path= path2model,
-                                 model=model,
-                                 device=self.device
-                                 )
+        self._model: nn.Module = load_model(file_path=path2model,
+                                            model=model,
+                                            device=self.device)
     
 
         return model
