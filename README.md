@@ -2,13 +2,15 @@
 
 # Table of contents
 1. [Overview](#overview)
-2. [Instalation](#installation)
-3. [Folder Structure](#fstructure)
+2. [Installation](#installation)
+3. [Repository Structure](#fstructure)
 4. [Usage](#usage)
 5. [Main piplines after training](#piplines)
 6. [Citation](#citation)
 
 --- 
+# 1. Overview <a name="overview"></a>
+
 # 1. Overview <a name="overview"></a>
 
 **RandLANet_Segmentation** is a set of tools for point cloud semantic segmentation using the RandLANet architecture. RandLANet is a deep learning model designed to process large-scale point clouds. Its architecture, which utilizes a random sampling strateg. The repository includes tools for defining the model, training it, and performing segmentation on new files. Key Features:
@@ -32,36 +34,8 @@ Key modifications we added:
 - model configurability from .json file,
 - better decoder upsampling.
 
-
 ---
-
-# 1. Instalation: <a name="installation"></a>
-
-```bash
-
-# Clone the repository to your local machine:
-
-git clone https://github.com/kalmary/RandLANet_Segmentation.git
-
-cd RandLANet_Segmentation
-
-# Create and activate a Virtual Environment:
-python -m venv .venv
-source .venv/bin/activate
-
-# Install all requirements, without pytorch and cuda
-pip install requirements.txt
-
-# Tested on this, but should work with any other version
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-
-# update git submodules
-git submodule update --init --recursive
-```
-
----
-
-# 2. Folder structure: <a name="fstructure"></a>
+# 2. Repository structure: <a name="fstructure"></a>
 
 ```
 .
@@ -82,11 +56,39 @@ git submodule update --init --recursive
     └── pcd_manipulation.py      #Point clound manipulations
 
 ```
+---
 
-# 3. Usage <a name="usage"></a>
-## 3.1 Preprocessing
+# 3. Instalation: <a name="installation"></a>
 
-Before training a model, data preprocessing must me done. To do so run:
+Clone the repository to your local machine:
+```bash
+
+git clone https://github.com/kalmary/RandLANet_Segmentation.git
+
+cd RandLANet_Segmentation
+```
+
+Create and activate a Virtual Environment and install requirements:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+
+# Install all requirements, without pytorch and cuda
+pip install requirements.txt
+
+# Tested on this, but should work with any other version
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+
+# update git submodules
+git submodule update --init --recursive
+```
+
+---
+
+# 4. Usage <a name="usage"></a>
+## 4.1 Preprocessing
+
+Before training a model, data preprocessing must be done. To do so run:
 ```bash
 python src/data_processing/downsample_LAZ.py --source_path path/to/raw/data --decimated_path path/to/decimated/pcds --converted_path path/to/final/processed/files
 ```
@@ -97,12 +99,39 @@ Paths used when processing:
 
 For more guidance/ guidance when running code, run it with ``--help`` flag.
 
-## 3.2 Training
+## 4.2 Training
+Examine contents of:
+- ``src/model_pipeline/model_configs`` - .json files with model architectures,
+- ``src/model_pipeline/training_configs`` - .json files with training configs.
+Pay attention to above files and adjust them to ensure the fit with your available resources.
+  
+Files with `_single` suffix are meant for single training without any optimizations. Theese are a good choice if fast/ based on known optimal parameters training is required.
+For most optimal results we recommend using options based on multidimensional space of hyperparameters:
+- grid based - only with optimization case is really simple/ configs combination number is low,
+- Optuna library based - for high dimensional and complex cases. If you have special needs in terms of time computation,
+you can change ``n_trials`` in ``main`` function of ``TrainSegmAutomated.py``:
+```python
+optuna_based_training(exp_config=exp_configs,
+                      model_name=model_name,
+                      n_trials=80)
 
+```
+``n_trials`` is what we found to be giving good, repeatable results, but lower numbers where also acceptable.
+
+To start training run:
 ```bash
 cd src/model_pipeline
-python TrainSegmAutomated.py --help
+python src/model_pipeline/TrainSegmAutomated.py --model_name MODEL_NAME --device cuda --mode 3
 ```
+Available flags:
+- ``model_name`` - name of your model. Results are stored in ``src/model_pipeline/training_results/MODEL_NAME``,
+- ``device`` - we recommend training on strong GPUs (tested on RTX 5090), but any CUDA enabled one with at least 16 GB of VRAM (smaller models), will work fine,
+- ``mode`` - you can choose following:
+    - `0` - testing mode: ,
+    - `1` ,
+    - `2` ,
+    - `3` ,
+    - `4` - check models - run this to get a rough idea of model resource demands.
 
 Output of --help
 
@@ -163,6 +192,7 @@ Output of --help
 | Using main.py.... | Opis 2 |
 ---
 # 6. Citation <a name="citation"></a>
+
 
 
 
