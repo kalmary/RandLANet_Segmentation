@@ -1,7 +1,7 @@
 ![BANNER](https://github.com/kalmary/RandLANet_Segmentation/blob/readme-preparation/img/Banner.png)
 
 
-**RandLANet_Segmentation** is ...
+**RandLANet_Segmentation** is a pure Python tool for point cloud data segmentation. Process is done with use of RandLANet model
 
 ---
 
@@ -140,6 +140,7 @@ Output of --help
 | Pipline for processing point clouds in arrays | Pipline for processing laz files |
 | :---: | :---: |
 | Using main.py.... | Opis 2 |
+
 
 
 
