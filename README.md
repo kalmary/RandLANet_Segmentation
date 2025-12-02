@@ -6,6 +6,7 @@
 - Training & Evaluation: Tools for training the model on your custom datasets and rigorously evaluating its performance.
 - Inference & Segmentation: Utility to perform semantic segmentation on new point cloud files using pre-trained models.
 
+![IMG](https://github.com/kalmary/RandLANet_Segmentation/blob/readme-preparation/img/RandLANet.png)
 ---
 
 ### Table of contents
@@ -143,6 +144,7 @@ Output of --help
 | Pipline for processing point clouds in arrays | Pipline for processing laz files |
 | :---: | :---: |
 | Using main.py.... | Opis 2 |
+
 
 
 
