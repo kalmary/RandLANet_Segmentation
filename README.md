@@ -15,7 +15,7 @@
 - Data preprocessing: cut, decimate and distribite data for training model,
 - Model definition: necessary code to define and build the RandLANet model architecture, allows for scalability and adjustment for hardware-specific needs,
 - Training & Evaluation: Tools for training the model on custom datasets and evaluating its performance,
-- Inference & Segmentation: Utility to perform semantic segmentation on new point cloud files using pre-trained models/ segmentation on point clouds (``np.ndarray``).
+- Inference & Segmentation: Utility to perform semantic segmentation on new point cloud files using pre-trained models/ segmentation on preloaded arrays.
 
 
 
@@ -163,6 +163,7 @@ Output of --help
 | Using main.py.... | Opis 2 |
 ---
 # 6. Citation <a name="citation"></a>
+
 
 
 
