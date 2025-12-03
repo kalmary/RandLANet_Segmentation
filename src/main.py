@@ -9,7 +9,20 @@ import numpy as np
 
 from array_processing import SegmentClass
 
+def iter_files(**kwargs):
+    """Iterates over files in a directory and processes them using the SegmentClass instance."""
+    input_path = kwargs.get('input_path')
+    output_path = kwargs.get('output_path')
+    device = kwargs.get('device')
+    model_name = kwargs.get('model_name')
 
+    # Create an instance of SegmentClass
+    segment_class = SegmentClass(device=device, model_name=model_name)
+
+    # Iterate over files in the input directory
+    for file_path in tqdm.tqdm(input_path.glob('*.laz'), desc="Processing files", unit="file"):
+        # Process the file using the SegmentClass instance
+        segment_class.process_file(file_path, output_path)
 
 def argparser():
 
@@ -76,14 +89,13 @@ def argparser():
 
     return parser.parse_args()
 
-
-
 def main():
     args = argparser
 
     # args to dict
     args_dict = vars(args)
-    print(args_dict)
+    
+
     
 
 

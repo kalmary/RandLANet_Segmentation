@@ -20,32 +20,36 @@ class SegmentClass:
     def __init__(self,
                  voxel_size_big: Optional[float] = None,
                  overlap: float = 0.4,
+                 model_name: str = None,
                  device: torch.device = torch.device('cpu'),
                  pbar = None):
         
         self.voxel_size_small = None
         self.voxel_size_big = voxel_size_big
         self.overlap = overlap
+        if model_name is None:
+            raise ValueError("model_name cannot be None")
+        self.model_name = model_name + '.pt'
 
         self.device = device
         self.pbar = pbar
 
         self._scaler = None
-        self._model_name = None
         self._model_config = None
         self._model = None
 
 
     # TODO adjust model loading 
-    def _load_config(self, config_path: pth.Path) -> dict:
+    def _load_config(self, config_dir: Union[pth.Path, str] = './final_files') -> dict:
+        config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
         config_dict = load_json(config_path)
-        self._model_name: str = config_path.stem.replace('_config.json', '.pt') # assumes model_name and config_model have analogous name
         self._model_config: dict = config_dict['model_config']
         self.voxel_size_small: float = self.model_config['max_voxel_dim']
 
         return config_dict
 
     def _load_segmModel(self, model_dir = "./final_files") -> nn.Module:
+
         path2model = pth.Path(model_dir).joinpath(self._model_name)
         model = RandLANet.from_config_file(self._model_config, self._model_config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
