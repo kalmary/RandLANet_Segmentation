@@ -10,6 +10,7 @@ import numpy as np
 from array_processing import SegmentClass
 
 
+
 def argparser():
 
 
@@ -51,6 +52,18 @@ def argparser():
     )
 
     parser.add_argument(
+        '--output_path',
+        type=str,
+        default='',
+        help=(
+            "Path to the directory with processed output files.\n"
+            "Each file is copied to /output_path/{original_file_name}_mod.laz\n"
+            "Files with the '_mod' suffix are the ones being processed.\n"
+            "If no output_path is given, 'modified' directory is created in every file's parent directory and _mod file is saved there."
+        )
+    )
+
+    parser.add_argument(
         '--mode',
         type=int,
         default=0,
@@ -64,6 +77,12 @@ def argparser():
     )
 
     return parser.parse_args()
+
+def main():
+    args = argparser()
+
+    
+
 
 if __name__ == "__main__":
     main()
