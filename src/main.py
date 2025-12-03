@@ -13,7 +13,6 @@ from array_processing import SegmentClass
 
 def argparser():
 
-
     parser = argparse.ArgumentParser(
         description="Script for semantic segmentation of point clouds.\n"
         "Supports .LAZ files (default). ",
@@ -29,7 +28,6 @@ def argparser():
         )
     )
 
-    
     # Flag definition
     parser.add_argument(
         '--device',
@@ -79,7 +77,7 @@ def argparser():
     return parser.parse_args()
 
 def main():
-    args = argparser()
+    args = argparser
 
     
 

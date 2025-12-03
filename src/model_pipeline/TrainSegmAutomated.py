@@ -432,7 +432,7 @@ def objective_function(trial: optuna.Trial,
         'num_neighbors': num_neighbors
     })
 
-    model.config['num_classes'] = exp_config['num_classes']
+    model_config['num_classes'] = exp_config['num_classes']
 
     exp_config = exp_config.copy()
     exp_config.update({
@@ -482,7 +482,7 @@ def objective_function(trial: optuna.Trial,
 
 
         normalized_loss = 1 / (1 + best_val_loss)
-        final_val = 0.4 * best_val_accuracy + 0.15 * normalized_loss + 0.45 * best_val_miou # TODO tuning might be necessary
+        final_val = 0.4 * best_val_accuracy + 0.2 * normalized_loss + 0.4 * best_val_miou # TODO tuning might be necessary
 
         checkpoint.check_checkpoint(model,
                                     model_name,
@@ -521,7 +521,7 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
 
     study = optuna.create_study(
         sampler=optuna.samplers.TPESampler(),
-        name = f'{model_name}_{timestamp}',
+        study_name = f'{model_name}_{timestamp}',
         storage=f'sqlite:///db.sqlite3',
         directions=['maximize'],
         pruner=pruner)
