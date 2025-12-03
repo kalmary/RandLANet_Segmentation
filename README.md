@@ -2,15 +2,16 @@
 
 # Table of contents
 1. [Overview](#overview)
-2. [Installation](#installation)
-3. [Repository Structure](#fstructure)
+2. [Repository Structure](#fstructure)
+3. [Installation](#installation)
 4. [Usage](#usage)
-5. [Main piplines after training](#piplines)
-6. [Citation](#citation)
+   1. [Preprocessing] (#preprocessing)
+   2. [Training] (#training)
+   3. [Evaluation] (#evaluation)
+6. [Main piplines after training](#piplines)
+7. [Citation](#citation)
 
 --- 
-# 1. Overview <a name="overview"></a>
-
 # 1. Overview <a name="overview"></a>
 
 **RandLANet_Segmentation** is a set of tools for point cloud semantic segmentation using the RandLANet architecture. RandLANet is a deep learning model designed to process large-scale point clouds. Its architecture, which utilizes a random sampling strateg. The repository includes tools for defining the model, training it, and performing segmentation on new files. Key Features:
@@ -86,7 +87,7 @@ git submodule update --init --recursive
 ---
 
 # 4. Usage <a name="usage"></a>
-## 4.1 Preprocessing
+## 1. Preprocessing <a name="preprocessing"></a>
 
 Before training a model, data preprocessing must be done. To do so run:
 ```bash
@@ -99,24 +100,13 @@ Paths used when processing:
 
 For more guidance/ guidance when running code, run it with ``--help`` flag.
 
-## 4.2 Training
+## 4.2 Training <a name="training"></a>
 Examine contents of:
 - ``src/model_pipeline/model_configs`` - .json files with model architectures,
 - ``src/model_pipeline/training_configs`` - .json files with training configs.
 Pay attention to above files and adjust them to ensure the fit with your available resources.
   
-Files with `_single` suffix are meant for single training without any optimizations. Theese are a good choice if fast/ based on known optimal parameters training is required.
-For most optimal results we recommend using options based on multidimensional space of hyperparameters:
-- grid based - only with optimization case is really simple/ configs combination number is low,
-- Optuna library based - for high dimensional and complex cases. If you have special needs in terms of time computation,
-you can change ``n_trials`` in ``main`` function of ``TrainSegmAutomated.py``:
-```python
-optuna_based_training(exp_config=exp_configs,
-                      model_name=model_name,
-                      n_trials=80)
-
-```
-``n_trials`` is what we found to be giving good, repeatable results, but lower numbers where also acceptable.
+Files with `_single` suffix are meant for single training without any optimizations. Others are for multi-hyperparameter optimization.
 
 To start training run:
 ```bash
@@ -128,53 +118,47 @@ Available flags:
 - ``device`` - we recommend training on strong GPUs (tested on RTX 5090), but any CUDA enabled one with at least 16 GB of VRAM (smaller models), will work fine,
 - ``mode`` - you can choose following:
     - `0` - testing mode: ,
-    - `1` ,
-    - `2` ,
-    - `3` ,
+    - `1` - single training without optimizations: good choice if fast/ based on known optimal parameters training is required.,
+    - `2` - grid based optimal hyperparameters search: only with optimization case is really simple/ configs combination number is low,,
+    - `3` - Optuna library based hyperparameter search: for high dimensional and complex cases. If you have special needs in terms of time computation,
     - `4` - check models - run this to get a rough idea of model resource demands.
+ 
 
-Output of --help
+For most optimal results we recommend using options based on multidimensional space of hyperparameters. If you choose Optuna based option you can change ``n_trials`` in ``main`` function of ``TrainSegmAutomated.py``:
+```python
+optuna_based_training(exp_config=exp_configs,
+                      model_name=model_name,
+                      n_trials=80)
 
-
-```bash
-Script for training the model based on predefined range of scenarios
-
-options:
-  -h, --help            show this help message and exit
-  --model_name MODEL_NAME
-                        Base of the model's name.
-                        When iterating, name also gets an ID. 
-                        If not given, defaults to: ResNet_0.
-  --device {cpu,cuda,gpu}
-                        Device for tensor based computation.
-                        Pick 'cpu' or 'cuda'/ 'gpu'.
-                        Device for tensor based computation.
-  --mode {0,1,2,3,4}    
-                        Pick:
-                        0: test
-                        1: single training
-                        2: multiple trainings, grid_based
-                        3: multiple trainings, with optuna
-                        4: only check models
 ```
+``n_trials=80`` is what we found to be giving good, repeatable results, but lower numbers where also acceptable. Even if the optimization process takes too long, 
+best model and its config are saved and overwritten if a better model is found. Alongside them, plots with metrics history (loss, accuracy, mIoU) are also saved.
 
-Training mode:
+For more guidance/ guidance when running code, run it with ``--help`` flag.
 
-* **Test** - This mode uses a dummy model to check if the overall system and configuration are working correctly.
-* **Single training** - Performs a single training run using a specified model and defined configuration settings.
-* **Multiple training grid_based** - Executes multiple training runs for hyperparameter tuning by systematically testing all combinations defined in a grid search configuration.
-* **Multiple training optuna** - Performs advanced hyperparameter optimization using Optuna. This mode can efficiently find a better optimal solution, often taking more time than a simple grid search. You can also utilize the Optuna Dashboard for visualization and monitoring.
-* **Only check models** - This mode check if model compiles.
+## 4.3 Evaluation <a name="evaluation"></a>
 
----
-
-For evaluating:
-
+To evaluate trained model, run EvalSegm_RandLANet.py with proper flags:
 
 ```bash
 cd src/model_pipeline
-python EvalSegm_RandLANet.py --help
+python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --device cuda --mode 1
 ```
+``model_name`` flag must be the exact name of model you got from training, but without extension name. For example:
+```
+RandLANetTest_123.pt -> RandLANetTest_123
+```
+Available modes are:
+- 0: testing mode:  check if model compiles and works as expected
+- 1: evaluation mode
+  
+Evaluation mode output are plots:
+- Precision recall curve,
+- Receiver operating characteristic curve,
+- Confusion matrix
+Last output is text classification report generated by ``classification_report`` from ``scikit-learn``.
+
+
 Output of --help
 
 ```bash
@@ -192,6 +176,7 @@ Output of --help
 | Using main.py.... | Opis 2 |
 ---
 # 6. Citation <a name="citation"></a>
+
 
 
 
