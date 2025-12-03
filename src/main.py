@@ -28,7 +28,6 @@ def argparser():
         )
     )
 
-    
     # Flag definition
     parser.add_argument(
         '--device',
@@ -80,7 +79,7 @@ def argparser():
 
 
 def main():
-    args = argparser()
+    args = argparser
 
     # args to dict
     args_dict = vars(args)
