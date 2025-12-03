@@ -4,7 +4,7 @@ from multiprocessing import shared_memory
 import pathlib as pth
 import os
 import sys
-import tqdm
+from tqdm import tqdm
 
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -22,7 +22,7 @@ class SegmentClass:
                  overlap: float = 0.4,
                  model_name: str = None,
                  device: torch.device = torch.device('cpu'),
-                 pbar = None):
+                 pbar_bool: bool = False):
         
         self.voxel_size_small = None
         self.voxel_size_big = voxel_size_big
@@ -31,8 +31,11 @@ class SegmentClass:
             raise ValueError("model_name cannot be None")
         self.model_name = model_name + '.pt'
 
+        if isinstance(device, str):
+            self.device = torch.device(device)
         self.device = device
-        self.pbar = pbar
+
+        self.pbar_bool = pbar_bool
 
         self._scaler = None
         self._model_config = None
@@ -41,6 +44,7 @@ class SegmentClass:
 
     # TODO adjust model loading 
     def _load_config(self, config_dir: Union[pth.Path, str] = './final_files') -> dict:
+
         config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
         config_dict = load_json(config_path)
         self._model_config: dict = config_dict['model_config']
@@ -48,9 +52,9 @@ class SegmentClass:
 
         return config_dict
 
-    def _load_segmModel(self, model_dir = "./final_files") -> nn.Module:
+    def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
 
-        path2model = pth.Path(model_dir).joinpath(self._model_name)
+        path2model = pth.Path(model_dir).joinpath(self.model_name)
         model = RandLANet.from_config_file(self._model_config, self._model_config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
@@ -125,7 +129,7 @@ class SegmentClass:
                                         k_neighbors_upsampling: int = 14,
                                         distance_sigma: float = 0.35,
                                         num_workers: int = -1,
-                                        pbar = None) -> np.array:
+                                        pbar: bool = None) -> np.array:
         
         shm_points_probs: Optional[shared_memory.SharedMemory] = None
         
@@ -135,8 +139,6 @@ class SegmentClass:
         else:
             num_workers = available_workers
 
-        if pbar is not None:
-            pbar.set_postfix({'CURRENT PROCESS': f'Soft upsampling - parallel: num_workers: {num_workers}'})
         
         try:
             # 1. build kdtree
@@ -208,11 +210,16 @@ class SegmentClass:
         voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), np.nan, dtype=np.float32)
 
         checksum = 0
+        generator = pcd_manipulation.voxelGridFragmentation(points,
+                                                            voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
+                                                            num_points = self.model_config['num_points'],
+                                                            overlap_ratio=0.4)
+        if self.pbar_bool:
+            pbar0 = tqdm(generator, desc="Points classification", unit="voxel", leave=False)
+        else:
+            pbar0 = generator
 
-        for i, (voxel_idx, noise) in enumerate(pcd_manipulation.voxelGridFragmentation(points,
-                                                                    voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
-                                                                    num_points = self.model_config['num_points'],
-                                                                    overlap_ratio=0.4)):
+        for (voxel_idx, noise) in pbar0:
 
             voxel = points[voxel_idx]
             voxel0 = voxel.copy()
@@ -250,12 +257,6 @@ class SegmentClass:
 
             voxel_probs_all[global_idx] = voxel_probs
             voxel_all[global_idx] = voxel
-
-
-            if self.pbar is not None:
-                self.pbar.set_postfix({
-                    'CURRENT PROCESS': f'Segmentation by small voxels: NUM POINTS: {checksum}, VOXEL: {i}'
-                })
 
         mask0 = np.isnan(voxel_all).any(axis = 1)
         mask1 = np.isnan(voxel_probs_all).any(axis=1)
