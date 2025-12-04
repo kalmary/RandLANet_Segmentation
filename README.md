@@ -31,8 +31,9 @@ Our model is based on:
 
 
 Key modifications we added:
-- like memory efficient, gpu - based knn search,
+- memory efficient, gpu - based knn search,
 - model configurability from .json file,
+- high scalability of model, training and processing pipelines,
 - better decoder upsampling.
 
 ---
@@ -165,6 +166,7 @@ As previously, you can run it with ``--help`` flag.
 
 
 # 6. Citation <a name="citation"></a>
+
 
 
 
