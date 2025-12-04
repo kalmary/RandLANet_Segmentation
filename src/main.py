@@ -2,12 +2,73 @@ from typing import Optional, Union
 import pathlib as pth
 import argparse
 import logging
-import tqdm
+import shutil
+from tqdm import tqdm
 
 import laspy
 import numpy as np
 
 from array_processing import SegmentClass
+import torch
+
+def iter_files(**kwargs):
+    """Iterates over files in a directory and processes them using the SegmentClass instance."""
+    input_path = pth.Path(kwargs.get('input_path'))
+    output_path = str(kwargs.get('output_path'))
+
+    no_output = False
+    if len(output_path) == 0:
+        no_output = True
+    else:
+        output_path = pth.Path(output_path)
+
+    output_path.mkdir(exist_ok=True, parents=True)
+
+    device = kwargs.get('device')
+    device = torch.device(device) if (device != 'cpu' and torch.cuda.is_available is True) else torch.device('cpu')
+
+    model_name = kwargs.get('model_name')
+
+
+
+    path_generator = input_path.rglob(f'*{kwargs.get('pcd_extension')}')
+    if kwargs.get('verbose'):
+        pbar = tqdm(path_generator, total=len(list(path_generator)), desc="Processing files", unit="file", leave=False)
+    else:
+        pbar = path_generator
+
+    # Create an instance of SegmentClass
+    segment_class = SegmentClass(voxel_size_big=np.array([100., 100.],), 
+                                 model_name=model_name,
+                                 device=device,
+                                 pbar_bool = kwargs.get('verbose'))
+    
+    for file_path in pbar:
+        if kwargs.get('verbose'):
+            pbar.set_postfix_str(f"Processing {file_path.name}")
+
+        if not no_output:
+            new_path = output_path.joinpath(f"{file_path.stem}_mod{file_path.suffix}")
+        else:
+            mod_dir = file_path.parent.joinpath('modified')
+            mod_dir.mkdir(exist_ok=True, parents=True)
+            new_path = mod_dir.joinpath(f"{file_path.stem}_mod{file_path.suffix}")
+
+        shutil.copy(file_path, new_path)
+
+        laz = laspy.read(new_path)
+        points = np.vstack([laz.x, laz.y, laz.z]).T
+        intensity = np.asarray(laz.intensity)
+
+        labels = segment_class.segment_pcd(points, intensity)
+
+        laz.classification = labels
+        laz.write(new_path)
+
+        
+
+
+
 
 
 
@@ -74,10 +135,25 @@ def argparser():
         )
     )
 
+    parser.add_argument(
+        '--verbose',
+        type=bool,
+        default=True,
+        help=(
+            "Verbose mode.\n"
+            "If True, the script will print additional information.\n"
+        )
+    )
+
     return parser.parse_args()
 
 def main():
     args = argparser
+
+    # args to dict
+    args_dict = vars(args)
+    args_dict['pcd_extension'] = '.laz'
+    
 
     
 
