@@ -8,7 +8,7 @@
     1. [Preprocessing](#preprocessing)
     2. [Training](#training)
     3. [Evaluation](#evaluation)
-5. [Final data processing](#piplines)
+5. [Final data processing](#pipelines)
 6. [Citation](#citation)
 
 --- 
@@ -212,6 +212,7 @@ To cite the original paper about RandLANet use:
   year = {2019}
 }
 ```
+
 
 
 
