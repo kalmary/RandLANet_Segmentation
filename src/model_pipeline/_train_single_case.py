@@ -131,7 +131,6 @@ def train_model(training_dict: dict,):
             epoch_samples_t = 0
             epoch_samples_v = 0
 
-            epoch_miou_t = 0.
             epoch_miou_v = 0.
 
 
@@ -161,30 +160,25 @@ def train_model(training_dict: dict,):
                     pass
 
                 accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
-                
-                mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
 
                 current_lr = optimizer.param_groups[0]['lr']
 
                 epoch_loss_t += loss_t.item() * batch_y.size(0)
                 epoch_accuracy_t += accuracy_t * batch_y.size(0)
-                epoch_miou_t += mIoU * batch_y.size(0)
                 epoch_samples_t += batch_y.size(0)
 
                 avg_loss_t = epoch_loss_t / epoch_samples_t
                 avg_accuracy_t = epoch_accuracy_t / epoch_samples_t
-                avg_miou_t = epoch_miou_t / epoch_samples_t
 
                 progressbar_t.set_postfix({
                     "Loss_train": f"{avg_loss_t:.6f}",
                     "Acc_train": f"{avg_accuracy_t:.6f}",
-                    "mIoU_train": f"{avg_miou_t:.6f}",
                     "learning_rate": f"{current_lr:.10f}"
                 })
 
             loss_hist.append(avg_loss_t)
             acc_hist.append(avg_accuracy_t)
-            miou_hist.append(avg_miou_t)
+            miou_hist.append(0.0)  # Not computed for training
 
             progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
             with torch.no_grad():

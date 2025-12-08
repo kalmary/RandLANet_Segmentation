@@ -198,7 +198,6 @@ class LocalFeatureAggregation(nn.Module):
 
         self.lrelu = nn.LeakyReLU()
 
-
     def forward(self, coords, features):
         r"""
             Forward pass
@@ -236,7 +235,6 @@ class RandLANet(nn.Module):
         d_in = model_config.get('d_in')
         self.num_neighbors = model_config.get('num_neighbors')
         self._num_neighbors_upsample = 3
-
         self.decimation = model_config.get('decimation')
 
         self.max_voxel_dim = model_config.get('max_voxel_dim')
@@ -340,8 +338,10 @@ class RandLANet(nn.Module):
         # <<<<<<<<<< ENCODER
         x_stack = []
 
-        permutation = torch.randperm(N)
-        coords = coords[:,permutation]
+        if self.training:
+            permutation = torch.randperm(N)
+            coords = coords[:,permutation]
+
         x = x[:,:,permutation]
 
         for i, lfa in enumerate(self.encoder):
@@ -361,12 +361,11 @@ class RandLANet(nn.Module):
 
         # <<<<<<<<<< DECODER
         for i, mlp in enumerate(self.decoder):
-            
             neighbors, distances = knn_me(
-                coords[:,:N//decimation_ratio].contiguous(), # original set
-                coords[:,:d*N//decimation_ratio].contiguous(), # upsampled set
-                self._num_neighbors_upsample  # Use 3 neighbors for better interpolation
-            ) # shape (B, N_upsampled, 3)
+                coords[:,:N//decimation_ratio].contiguous(),
+                coords[:,:d*N//decimation_ratio].contiguous(),
+                self._num_neighbors_upsample
+            )
 
             B, C, N_down, _ = x.size()
             N_up = neighbors.size(1)
@@ -392,8 +391,9 @@ class RandLANet(nn.Module):
             decimation_ratio //= d
 
         # >>>>>>>>>> DECODER
+        if self.training:
+            x = x[:,:,torch.argsort(permutation)]
 
-        x = x[:,:,torch.argsort(permutation)]
         scores = self.fc_end(x)
 
         return scores.squeeze(-1)
