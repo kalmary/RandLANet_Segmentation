@@ -7,7 +7,7 @@
     "data_path_val": "/home/michal-siniarski/Dokumenty/Z32/LAS/SEGM_DATA/BRIK/distributed/validation.h5",
     
     "num_classes": 10,
-    "batch_size": [6, 8, 2],
+    "batch_size": [6, 10, 2],
     "num_points": [8192, 16384, 8192],
     "num_neighbors": [16, 16, 16],
 

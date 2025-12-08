@@ -328,6 +328,11 @@ class RandLANet(nn.Module):
 
         input = input_norm(input, max_voxel_dim=self.max_voxel_dim)
 
+        if self.training:
+            permutation = torch.randperm(N, device=input.device) 
+            input = input[:,permutation]
+        
+
         coords = input[..., :3]
 
         x = self.fc_start(input).transpose(-2,-1).unsqueeze(-1)
@@ -338,11 +343,10 @@ class RandLANet(nn.Module):
         # <<<<<<<<<< ENCODER
         x_stack = []
 
-        if self.training:
-            permutation = torch.randperm(N)
-            coords = coords[:,permutation]
-
-        x = x[:,:,permutation]
+        # if self.training:
+        #     permutation = torch.randperm(N, device=coords.device) 
+        #     coords = coords[:,permutation]
+        #     x = x[:,:,permutation]
 
         for i, lfa in enumerate(self.encoder):
 
@@ -391,10 +395,11 @@ class RandLANet(nn.Module):
             decimation_ratio //= d
 
         # >>>>>>>>>> DECODER
-        if self.training:
-            x = x[:,:,torch.argsort(permutation)]
+
 
         scores = self.fc_end(x)
+        if self.training:
+            scores = scores[:, : ,torch.argsort(permutation)]
 
         return scores.squeeze(-1)
     
@@ -426,7 +431,7 @@ def test_model():
             'layers': [64, 32],
             'dropout': 0.5
         },
-        'max_voxel_dim': 25
+        'max_voxel_dim': 20.
     }
     
     batch_size = 15

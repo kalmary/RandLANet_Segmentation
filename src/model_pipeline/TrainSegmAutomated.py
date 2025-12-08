@@ -213,7 +213,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
         model_configs_paths_list = [p for p in model_configs_paths_list if "single" not in p.stem]
     
     training_config = convert_str_values(training_config)
-    model_configs_list, _ = check_models(model_configs_paths_list, max_input_size=(training_config['batch_size'][-1], 8192, 4))
+    model_configs_list, _ = check_models(model_configs_paths_list, max_input_size=(8, 2*8192, 4), max_memory_GB=32)
     
     assert model_configs_list != 0, "No models compiled. Check model_configs - most likely too big models are defined"
 
@@ -545,9 +545,7 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
                 "Current": f"{trial.value:.4f}" if trial.value else "Pruned"
             })
         except ValueError:
-            pbar.set_postfix({
-                "Trial was pruned. No results to display"
-            })
+            pbar.set_postfix({"Status": "Pruned"})
 
     checkpoint = Checkpoint(existing_ok=False)                          
 

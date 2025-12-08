@@ -35,8 +35,8 @@ def train_model(training_dict: dict,):
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
-                             num_workers = 14,
-                             pin_memory=False)
+                             num_workers = 12,
+                             pin_memory=True)
     
 
 
@@ -49,8 +49,8 @@ def train_model(training_dict: dict,):
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,
-                             num_workers = 14,
-                             pin_memory=False)
+                             num_workers = 12,
+                             pin_memory=True)
 
     total_t = get_dataset_len(trainLoader)
     total_v = get_dataset_len(valLoader)
@@ -140,8 +140,10 @@ def train_model(training_dict: dict,):
                                     position=3,
                                     leave=False)
             
+            model.train(True)
+            
             for batch_x, batch_y in progressbar_t:
-                model.train(True)
+                
                 batch_x = batch_x.to(training_dict['device'])
                 outputs = model(batch_x)
 
@@ -181,9 +183,11 @@ def train_model(training_dict: dict,):
             miou_hist.append(-1.)  # Not computed for training
 
             progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
+            model.eval()
+
             with torch.no_grad():
                 for batch_x, batch_y in progressbar_v:
-                    model.eval()
+
                     batch_x = batch_x.to(training_dict['device'])
                     outputs = model(batch_x)
 
