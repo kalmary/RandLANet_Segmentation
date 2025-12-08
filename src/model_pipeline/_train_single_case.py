@@ -178,7 +178,7 @@ def train_model(training_dict: dict,):
 
             loss_hist.append(avg_loss_t)
             acc_hist.append(avg_accuracy_t)
-            miou_hist.append(0.0)  # Not computed for training
+            miou_hist.append(-1.)  # Not computed for training
 
             progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
             with torch.no_grad():
