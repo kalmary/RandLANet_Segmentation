@@ -1,7 +1,7 @@
 {
     "d_in": 4,
-    "num_neighbors": 16,
-    "decimation": 2,
+    "num_neighbors": 32,
+    "decimation": 4,
     "encoder_layers": [
       {"d_in": 8, "d_out": 32},
       {"d_in": 64, "d_out": 128},
@@ -12,14 +12,14 @@
       {"d_in": 2048, "d_out": 512},
       {"d_in": 1024, "d_out": 256},
       {"d_in": 512, "d_out": 128},
-      {"d_in": 192, "d_out": 32}
+      {"d_in": 192, "d_out": 24}
     ],
     "fc_start": {
       "d_out": 8
     },
     "fc_end": {
-      "layers": [20],
-      "dropout": 0.35
+      "layers": [16],
+      "dropout": 0.25
     },
     "max_voxel_dim": 20
   }

@@ -1,6 +1,14 @@
 import torch
 import torch.nn as nn
 from torchinfo import summary
+
+import pathlib as pth
+import sys
+src_dir = pth.Path(__file__).parent.parent
+sys.path.append(str(src_dir))
+
+# from utils import knn as knn_me
+
 import json
 from pathlib import Path
 from typing import Union, Dict, Any, Optional
@@ -29,20 +37,6 @@ def knn_me(src, tgt, k):
         all_dist.append(dist)
 
     return torch.cat(all_idx, dim=1), torch.cat(all_dist, dim=1)
-
-def knn(src, tgt, k):
-
-    # B, N_src, D = src.size()
-    # B, N_tgt, D = tgt.size()
-
-    # Calculate Euclidean distances directly using torch.cdist
-    # distances shape: (B, N_src, N_tgt)
-    distances = torch.cdist(tgt, src)
-
-    # Find the k nearest neighbors and their distances
-    dist, idx = torch.topk(distances, k=k, dim=-1, largest=False)
-
-    return idx, dist
 
 def input_norm(input: torch.Tensor, max_voxel_dim = 20.):
     max_voxel_dim /= 2

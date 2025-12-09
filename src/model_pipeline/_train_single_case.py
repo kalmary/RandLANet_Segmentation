@@ -35,7 +35,7 @@ def train_model(training_dict: dict,):
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
-                             num_workers = 12,
+                             num_workers = 10,
                              pin_memory=True)
     
 
@@ -49,7 +49,7 @@ def train_model(training_dict: dict,):
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,
-                             num_workers = 12,
+                             num_workers = 10,
                              pin_memory=True)
 
     total_t = get_dataset_len(trainLoader)
