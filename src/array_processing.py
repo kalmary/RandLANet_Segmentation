@@ -266,8 +266,6 @@ class SegmentClass:
         voxel_all = voxel_all[~mask0]
         voxel_probs_all = voxel_probs_all[~mask1]
 
-        del voxel_probs, voxel, voxel0, voxel_idx
-
         return voxel_all, voxel_probs_all
     
 

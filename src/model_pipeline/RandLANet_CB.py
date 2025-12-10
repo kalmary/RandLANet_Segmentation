@@ -7,7 +7,7 @@ import sys
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-# from utils import knn as knn_me
+from utils import KNNCache
 
 import json
 from pathlib import Path
@@ -192,7 +192,8 @@ class LocalFeatureAggregation(nn.Module):
 
         self.lrelu = nn.LeakyReLU()
 
-    def forward(self, coords, features):
+
+    def forward(self, coords_idx, knn_query: KNNCache, features):
         r"""
             Forward pass
 
@@ -207,7 +208,10 @@ class LocalFeatureAggregation(nn.Module):
             -------
             torch.Tensor, shape (B, 2*d_out, N, 1)
         """
-        knn_output = knn_me(coords.contiguous(), coords.contiguous(), self.num_neighbors)
+        # knn_output = knn_me(tgt_idx, src_idx, self.num_neighbors)
+        knn_output = knn_query.query(coords_idx, coords_idx, self.num_neighbors)
+        coords = knn_query.get_coords(coords_idx)
+
 
         x = self.mlp1(features)
 
@@ -230,6 +234,8 @@ class RandLANet(nn.Module):
         self.num_neighbors = model_config.get('num_neighbors')
         self._num_neighbors_upsample = 3
         self.decimation = model_config.get('decimation')
+
+        self.KNN = KNNCache()
 
         self.max_voxel_dim = model_config.get('max_voxel_dim')
         
@@ -320,6 +326,8 @@ class RandLANet(nn.Module):
         d = self.decimation
         N = input.shape[1]
 
+
+
         input = input_norm(input, max_voxel_dim=self.max_voxel_dim)
 
         if self.training:
@@ -328,6 +336,7 @@ class RandLANet(nn.Module):
         
 
         coords = input[..., :3]
+        self.KNN.build(coords)
 
         x = self.fc_start(input).transpose(-2,-1).unsqueeze(-1)
         x = self.bn_start(x) # shape (B, d, N, 1)
@@ -337,15 +346,10 @@ class RandLANet(nn.Module):
         # <<<<<<<<<< ENCODER
         x_stack = []
 
-        # if self.training:
-        #     permutation = torch.randperm(N, device=coords.device) 
-        #     coords = coords[:,permutation]
-        #     x = x[:,:,permutation]
-
         for i, lfa in enumerate(self.encoder):
 
             # at iteration i, x.shape = (B, N//(d**i), d_in)
-            x = lfa(coords[:,:N//decimation_ratio], x)
+            x = lfa(torch.arange((N//decimation_ratio), device=coords.device), self.KNN, x)
             x_stack.append(x)
             decimation_ratio *= d
             x = x[:,:,:N//decimation_ratio]
@@ -359,9 +363,14 @@ class RandLANet(nn.Module):
 
         # <<<<<<<<<< DECODER
         for i, mlp in enumerate(self.decoder):
-            neighbors, distances = knn_me(
-                coords[:,:N//decimation_ratio].contiguous(),
-                coords[:,:d*N//decimation_ratio].contiguous(),
+            # neighbors, distances = knn_me(
+            #     coords[:,:N//decimation_ratio].contiguous(),
+            #     coords[:,:d*N//decimation_ratio].contiguous(),
+            #     self._num_neighbors_upsample
+            # )
+            neighbors, distances = self.KNN.query(
+                torch.arange(N//decimation_ratio),
+                torch.arange(d*N//decimation_ratio),
                 self._num_neighbors_upsample
             )
 
@@ -389,6 +398,8 @@ class RandLANet(nn.Module):
             decimation_ratio //= d
 
         # >>>>>>>>>> DECODER
+
+        self.KNN.clear()
 
 
         scores = self.fc_end(x)

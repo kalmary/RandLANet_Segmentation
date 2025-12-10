@@ -20,18 +20,23 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from utils import load_json, load_model, convert_str_values
-from utils import get_dataset_len, calculate_class_weights, calculate_weighted_accuracy, compute_mIoU, LabelSmoothingFocalLoss, get_intLabels, get_Probabilities
+from utils import get_dataset_len, calculate_class_weights, calculate_weighted_accuracy, compute_mIoU, FocalLoss_ArcFace, get_intLabels, get_Probabilities
 from utils import Plotter, ClassificationReport
 
 
 def _eval_model(config_dict: dict,
                 model: nn.Module) -> tuple[list, list, np.ndarray, np.ndarray, np.ndarray]:
+    device_gpu = torch.device('cuda')
+    device_cpu = torch.device('cpu')
+
+    device_loader = device_gpu
+    device_loss = device_cpu
     
     test_dataset = Dataset(base_dir=config_dict['data_path_test'],
                                     num_points=config_dict['num_points'],
                                     batch_size=config_dict['batch_size'],
                                     shuffle=False,
-                                    device=torch.device('gpu'))
+                                    device=device_loader)
 
     testLoader = DataLoader(test_dataset,
                              batch_size=None,
@@ -42,11 +47,12 @@ def _eval_model(config_dict: dict,
     weights = calculate_class_weights(testLoader, 
                                       config_dict['num_classes'], 
                                       total=total, 
-                                      device=config_dict['device'],
+                                      device=device_loader,
                                       verbose=False)
+    weights = weights.to(device_loss)
     
-    criterion = LabelSmoothingFocalLoss(alpha=weights.cpu(),
-                                        gamma=config_dict['focal_loss_gamma'])
+    criterion = FocalLoss_ArcFace(alpha=weights.to(device_loss),
+                                gamma=config_dict['focal_loss_gamma']).to(device_loss)
 
     loss_per_epoch = 0.
     accuracy_per_epoch = 0.0
@@ -65,7 +71,10 @@ def _eval_model(config_dict: dict,
 
 
             outputs = model(batch_x)
-            loss = criterion(outputs.cpu(), batch_y.cpu())
+            outputs = outputs.to(device_loss)
+            batch_y = batch_y.to(device_loss)
+
+            loss = criterion(outputs, batch_y)
             
             accuracy = calculate_weighted_accuracy(outputs, batch_y, weights=weights)
             
@@ -89,11 +98,9 @@ def _eval_model(config_dict: dict,
             all_probs = np.concatenate([all_probs, probs.reshape(-1, config_dict['num_classes'])], axis=0)
             all_predictions.extend(int_preds)
 
-    return total_loss, total_accuracy, np.asarray(all_labels), all_probs, np.asarray(all_predictions)
+    return total_loss, total_accuracy, np.asarray(all_labels), all_probs.reshape(-1, config_dict['num_classes']), np.asarray(all_predictions)
 
 def eval_model_front(config_dict: dict,
-         spectrogram_params: dict,
-         filtration_params: dict,
          model: nn.Module,
          paths: list[pth.Path]):
 
@@ -103,9 +110,7 @@ def eval_model_front(config_dict: dict,
     plot_dir = paths[1]
 
     total_loss, total_accuracy, all_labels, all_probs, all_predictions  = _eval_model(config_dict=config_dict,
-                                                                                        spectrogram_params=spectrogram_params,
-                                                                                        filtration_params=filtration_params,
-                                                                                        model=model)
+                                                                                      model=model)
     
     miou, avg_iou_pc = compute_mIoU(torch.asarray(all_predictions), torch.asarray(all_labels), config_dict['num_classes'])
     
@@ -132,8 +137,6 @@ def eval_model_front(config_dict: dict,
                          additional_info=miou_report)
 
 def test_function(config_dict: dict,
-                  spectrogram_params: dict,
-                  filtration_params: dict,
                   model):
     val_dataset = Dataset(base_dir=config_dict['data_path_test'],
                                     num_points=config_dict['num_points'],
@@ -215,31 +218,25 @@ def main():
     model_name = args.model_name
     model_name_no_num = model_name.rsplit('_', 1)[0]
 
-    config_dir = base_path.joinpath('config_files')
     model_dir = base_path.joinpath(f'training_results/{model_name_no_num}')
     config_trained_dir = model_dir.joinpath('dict_files')
     model_path = config_trained_dir.joinpath(f'{model_name}_config.json')
     plot_dir = model_dir.joinpath('plots')
 
-    spectrogram_params = load_json(config_dir.joinpath('fft_params.json'))
-    filtration_params = load_json(config_dir.joinpath('filtration_params.json'))
-
     config_dict = load_json(model_path)
     config_dict = convert_str_values(config_dict)
     config_dict['device'] = device
     
-    model = RandLANet(config_data=config_dict['model_config'], num_classes=config_dict['num_classes'])
+    model = RandLANet(model_config=config_dict['model_config'], num_classes=config_dict['num_classes'])
     model = load_model(file_path=model_dir.joinpath(f'{model_name}.pt'),
                        model=model,
                        device=device)
     model.eval()
 
     if args.mode == 0:
-        test_function(config_dict, spectrogram_params, filtration_params, model)
+        test_function(config_dict, model)
     elif args.mode == 1:
         eval_model_front(config_dict=config_dict,
-                         spectrogram_params=spectrogram_params,
-                         filtration_params=filtration_params,
                          model=model,
                          paths=[model_path,
                                 plot_dir])
