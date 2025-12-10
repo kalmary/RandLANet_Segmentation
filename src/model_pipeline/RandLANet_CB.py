@@ -42,13 +42,10 @@ def input_norm(input: torch.Tensor, max_voxel_dim = 20.):
     max_voxel_dim /= 2
 
     coords = input[..., :3]
-    intensity = input[..., 3]
-
-    coords -= coords.mean(dim=1, keepdim=True)
-    coords /= max_voxel_dim
-
-    input = torch.cat((coords, intensity.unsqueeze(-1)), dim=-1)
-
+    coords.sub_(coords.mean(dim=1, keepdim=True))
+    coords.div_(max_voxel_dim)
+    
+    input[..., :3] = coords
     return input
 
 
@@ -173,6 +170,7 @@ class AttentivePooling(nn.Module):
 
         # sum over the neighbors
         features = torch.sum(scores * x, dim=-1, keepdim=True) # shape (B, d_in, N, 1)
+        del scores
 
         return self.output_mlp(features)
 
@@ -193,7 +191,7 @@ class LocalFeatureAggregation(nn.Module):
         self.pool1 = AttentivePooling(d_out, d_out//2)
         self.pool2 = AttentivePooling(d_out, d_out)
 
-        self.lrelu = nn.LeakyReLU()
+        self.lrelu = nn.LeakyReLU(inplace=True)
 
 
     def forward(self, coords_idx, knn_query: KNNCache, features):
@@ -363,8 +361,6 @@ class RandLANet(nn.Module):
 
         x = self.mlp(x)
 
-
-        # <<<<<<<<<< DECODER
         # <<<<<<<<<< DECODER
         for i, mlp in enumerate(self.decoder):
             down_indices = torch.arange(N//decimation_ratio, device=coords.device)
@@ -375,36 +371,42 @@ class RandLANet(nn.Module):
                 self._num_neighbors_upsample
             )
 
-            B, C, N_down, _ = x.size()
-            N_up = neighbors.size(1)
+            _, C, _, _ = x.size()
+            # N_up = neighbors.size(1)
             
             # Ensure neighbors is long type for gather
             neighbors = neighbors.long()
             
             # Inverse distance weighting for interpolation
-            weights = 1.0 / (distances + 1e-8)
-            weights = weights / weights.sum(dim=-1, keepdim=True)  # (B, N_up, 3)
+            distances.add_(1e-8)
+            torch.reciprocal_(distances)
+            weights = distances / distances.sum(dim=-1, keepdim=True)  # (B, N_up, 3)
+            del distances
 
             # Reshape for gathering: (B, C, N_down, 1) -> gather -> (B, C, N_up, K)
             # We need to gather from the spatial dimension (dim=2)
             extended_neighbors = neighbors.unsqueeze(1).expand(-1, C, -1, -1)  # (B, C, N_up, 3)
+            del neighbors
             
             # Gather neighbors features
             x_neighbors = torch.gather(x.expand(-1, -1, -1, self._num_neighbors_upsample), 2, extended_neighbors)  # (B, C, N_up, 3)
+            del extended_neighbors
             
             # Apply weights and sum: (B, C, N_up, 3) * (B, 1, N_up, 3) -> sum -> (B, C, N_up, 1)
-            x_upsampled = (x_neighbors * weights.unsqueeze(1)).sum(dim=-1, keepdim=True)
+            x_neighbors.mul_(weights.unsqueeze(1))
+            del weights
 
-            x = torch.cat((x_upsampled, x_stack.pop()), dim=1)
+            x = torch.cat((x_neighbors.sum(dim=-1, keepdim=True), x_stack.pop()), dim=1)
+            del x_neighbors
 
             x = mlp(x)
 
             decimation_ratio //= d
 
+        del x_stack
         # >>>>>>>>>> DECODER
-
+        
         self.KNN.clear()
-
 
         scores = self.fc_end(x)
         if self.training:
@@ -443,7 +445,7 @@ def test_model():
         'max_voxel_dim': 20.
     }
     
-    batch_size = 15
+    batch_size = 10
     num_points = 8192
     num_classes = 10
 

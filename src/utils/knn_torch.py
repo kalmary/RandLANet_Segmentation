@@ -17,7 +17,6 @@ class KNNCache:
 
         # Process in chunks to avoid large distance matrices
         chunk_size = min(1024, N_tgt)  # Adjust based on available memory
-
         all_dist = []
 
         for i in range(0, N_tgt, chunk_size):
@@ -34,18 +33,14 @@ class KNNCache:
         self.distances = torch.cat(all_dist, dim=1)
     
     def query(self, src_idx: torch.Tensor, tgt_idx: torch.Tensor, num_neighbors) -> Tuple[torch.Tensor, torch.Tensor]:
-        assert self.pcd is not None, "KNN not initialized"
         
-        # Ensure src_idx and tgt_idx are long type
-        src_idx = src_idx.long()
-        tgt_idx = tgt_idx.long()
+        assert self.distances is not None or self.pcd is not None, "KNN not initialized"
         
-        # Extract the relevant points
-        src_points = self.pcd[:, src_idx]  # (B, N_src, 3)
-        tgt_points = self.pcd[:, tgt_idx]  # (B, N_tgt, 3)
+        B = self.distances.shape[0]
+        N_tgt = len(tgt_idx)
+        N_src = len(src_idx)
         
-        # Compute distances only for needed points
-        B, N_tgt, D = tgt_points.shape
+        # For memory efficiency, process in chunks if needed
         chunk_size = min(1024, N_tgt)
         
         all_dist = []
@@ -53,22 +48,22 @@ class KNNCache:
         
         for i in range(0, N_tgt, chunk_size):
             end_idx = min(i + chunk_size, N_tgt)
-            tgt_chunk = tgt_points[:, i:end_idx]
+            tgt_chunk = tgt_idx[i:end_idx]
             
-            # Compute distances for this chunk
-            distances = torch.cdist(tgt_chunk, src_points)  # (B, chunk_size, N_src)
+            # Extract only the needed distances for this chunk
+            # Shape: (B, chunk_size, N_src)
+            chunk_distances = self.distances[:, tgt_chunk][:, :, src_idx]
             
             # Find k nearest neighbors
-            dist, local_idx = torch.topk(distances, k=num_neighbors, dim=-1, largest=False)
+            dist, local_idx = torch.topk(chunk_distances, k=num_neighbors, dim=-1, largest=False)
             
-            # Map local indices back to original point cloud indices (ensure long type)
+            # Map local indices back to original point cloud indices
             idx = src_idx[local_idx]
             
             all_dist.append(dist)
             all_idx.append(idx)
         
-        # Concatenate results - indices will be long type since src_idx is long
-        return torch.cat(all_dist, dim=1), torch.cat(all_idx, dim=1)
+        return torch.cat(all_idx, dim=1), torch.cat(all_dist, dim=1)
     
     def get_coords(self, idx) -> torch.Tensor:
         return self.pcd[:, idx]
