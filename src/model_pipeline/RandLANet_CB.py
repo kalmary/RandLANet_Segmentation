@@ -14,38 +14,14 @@ from pathlib import Path
 from typing import Union, Dict, Any, Optional
 
 
-def knn_me(src, tgt, k):
-    """Memory-efficient KNN using chunked processing"""
-    B, N_src, D = src.size()
-    B, N_tgt, D = tgt.size()
-
-    # Process in chunks to avoid large distance matrices
-    chunk_size = min(1024, N_tgt)  # Adjust based on available memory
-
-    all_idx = []
-    all_dist = []
-
-    for i in range(0, N_tgt, chunk_size):
-        end_idx = min(i + chunk_size, N_tgt)
-        tgt_chunk = tgt[:, i:end_idx]
-
-        # Only compute distances for this chunk
-        distances = torch.cdist(tgt_chunk, src)
-        dist, idx = torch.topk(distances, k=k, dim=-1, largest=False)
-
-        all_idx.append(idx)
-        all_dist.append(dist)
-
-    return torch.cat(all_idx, dim=1), torch.cat(all_dist, dim=1)
-
 def input_norm(input: torch.Tensor, max_voxel_dim = 20.):
-    max_voxel_dim /= 2 # voxels should be in range (-10, 10), intensity (0, 10) -> both moved into (-1, 1) range
+    max_voxel_dim /= 2 # voxels should be in range (-10, 10), intensity (0, 10) -> both moved into (0, .2) range
 
     coords = input[..., :3]
     coords.sub_(coords.mean(dim=1, keepdim=True)) # center
     coords.div_(max_voxel_dim) # scale
 
-    input[..., -1].div_(5.).sub_(1.) # intensity scale + center
+    input[..., -1].div_(5.).sub(1.) # intensity scale + center
     
     input[..., :3] = coords
     return input
@@ -74,8 +50,10 @@ class SharedMLP(nn.Module):
             out_channels,
             kernel_size,
             stride=stride,
+            padding=0,
             padding_mode=padding_mode
         )
+
         self.batch_norm = nn.BatchNorm2d(out_channels, eps=1e-6, momentum=0.99) if bn else None
         self.activation_fn = activation_fn
 
@@ -130,11 +108,11 @@ class LocalSpatialEncoding(nn.Module):
 
         # Concatenate all spatial features at once
         concat = torch.cat([
-            center_coords.expand(-1, -1, -1, K),  # center coordinates
-            neighbors,  # neighbor coordinates
-            relative_pos,  # relative positions
-            dist.unsqueeze(1)  # distances
-        ], dim=1)  # Shape: (B, 10, N, K)
+            center_coords.expand(-1,-1,-1,K),   # p_i
+            relative_pos,                       # p_j - p_i
+            neighbors,                           # p_j
+            dist.unsqueeze(1)                    # distance
+        ], dim=1)
 
         # Process through MLP
         encoded = self.mlp(concat)
@@ -185,7 +163,8 @@ class LocalFeatureAggregation(nn.Module):
 
         self.mlp1 = SharedMLP(d_in, d_out//2, activation_fn=nn.LeakyReLU(0.2))
         self.mlp2 = SharedMLP(d_out, 2*d_out)
-        self.shortcut = SharedMLP(d_in, 2*d_out, bn=True)
+        self.shortcut = SharedMLP(d_in, 2*d_out, bn=True, activation_fn=nn.ReLU())
+
 
         self.lse1 = LocalSpatialEncoding(d_out//2, num_neighbors)
         self.lse2 = LocalSpatialEncoding(d_out//2, num_neighbors)
@@ -228,6 +207,7 @@ class LocalFeatureAggregation(nn.Module):
         return self.lrelu(self.mlp2(x) + self.shortcut(features))
 
 
+
 class RandLANet(nn.Module):
     def __init__(self, model_config: dict, num_classes: int):
         super(RandLANet, self).__init__()
@@ -255,7 +235,9 @@ class RandLANet(nn.Module):
         self.fc_start = nn.Linear(d_in, fc_start_d_out)
         self.bn_start = nn.Sequential(
             nn.BatchNorm2d(fc_start_d_out, eps=1e-6, momentum=0.99),
-            nn.Tanh()
+            nn.LeakyReLU(negative_slope=0.2, inplace=False)
+            
+            # nn.Tanh()
         )
 
         # encoding layers - build from config
@@ -278,6 +260,8 @@ class RandLANet(nn.Module):
             SharedMLP(layer['d_in'], layer['d_out'], **decoder_kwargs)
             for layer in decoder_layers
         ])
+
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=False)
 
         # fc_end: configurable layers and dropout
         fc_end_layers = fc_end_config.get('layers', [64, 32])
@@ -402,6 +386,7 @@ class RandLANet(nn.Module):
             del x_neighbors
 
             x = mlp(x)
+            x = self.lrelu(x)
 
             decimation_ratio //= d
 
