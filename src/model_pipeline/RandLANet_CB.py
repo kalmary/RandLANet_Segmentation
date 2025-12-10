@@ -111,13 +111,16 @@ class LocalSpatialEncoding(nn.Module):
         idx, dist = knn_output
         B, N, K = idx.size()
 
+        # Ensure idx is long type for indexing
+        idx = idx.long()
+        
         # More memory-efficient approach
         coords_t = coords.transpose(-2, -1)  # (B, 3, N) - done once
 
         # Efficient neighbor gathering using advanced indexing
-        # This avoids creating the large expanded tensors
-        batch_indices = torch.arange(B, device=coords.device).view(B, 1, 1, 1)
-        coord_indices = torch.arange(3, device=coords.device).view(1, 3, 1, 1)
+        # IMPORTANT: All index tensors must be long type
+        batch_indices = torch.arange(B, device=coords.device, dtype=torch.long).view(B, 1, 1, 1)
+        coord_indices = torch.arange(3, device=coords.device, dtype=torch.long).view(1, 3, 1, 1)
         neighbors = coords_t[batch_indices, coord_indices, idx.unsqueeze(1)]  # (B, 3, N, K)
 
         # Create center coordinates efficiently
@@ -252,7 +255,6 @@ class RandLANet(nn.Module):
         self.fc_start = nn.Linear(d_in, fc_start_d_out)
         self.bn_start = nn.Sequential(
             nn.BatchNorm2d(fc_start_d_out, eps=1e-6, momentum=0.99),
-            # nn.LeakyReLU(0.2)
             nn.Tanh()
         )
 
@@ -363,12 +365,8 @@ class RandLANet(nn.Module):
 
 
         # <<<<<<<<<< DECODER
+        # <<<<<<<<<< DECODER
         for i, mlp in enumerate(self.decoder):
-            # neighbors, distances = knn_me(
-            #     coords[:,:N//decimation_ratio].contiguous(),
-            #     coords[:,:d*N//decimation_ratio].contiguous(),
-            #     self._num_neighbors_upsample
-            # )
             down_indices = torch.arange(N//decimation_ratio, device=coords.device)
             up_indices = torch.arange(d*N//decimation_ratio, device=coords.device)
             neighbors, distances = self.KNN.query(
@@ -379,6 +377,9 @@ class RandLANet(nn.Module):
 
             B, C, N_down, _ = x.size()
             N_up = neighbors.size(1)
+            
+            # Ensure neighbors is long type for gather
+            neighbors = neighbors.long()
             
             # Inverse distance weighting for interpolation
             weights = 1.0 / (distances + 1e-8)
