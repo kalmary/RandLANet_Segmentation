@@ -39,11 +39,13 @@ def knn_me(src, tgt, k):
     return torch.cat(all_idx, dim=1), torch.cat(all_dist, dim=1)
 
 def input_norm(input: torch.Tensor, max_voxel_dim = 20.):
-    max_voxel_dim /= 2
+    max_voxel_dim /= 2 # voxels should be in range (-10, 10), intensity (0, 10) -> both moved into (-1, 1) range
 
     coords = input[..., :3]
-    coords.sub_(coords.mean(dim=1, keepdim=True))
-    coords.div_(max_voxel_dim)
+    coords.sub_(coords.mean(dim=1, keepdim=True)) # center
+    coords.div_(max_voxel_dim) # scale
+
+    input[..., -1].div_(5.).sub_(1.) # intensity scale + center
     
     input[..., :3] = coords
     return input

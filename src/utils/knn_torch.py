@@ -35,10 +35,8 @@ class KNNCache:
     def query(self, src_idx: torch.Tensor, tgt_idx: torch.Tensor, num_neighbors) -> Tuple[torch.Tensor, torch.Tensor]:
         
         assert self.distances is not None or self.pcd is not None, "KNN not initialized"
-        
-        B = self.distances.shape[0]
+
         N_tgt = len(tgt_idx)
-        N_src = len(src_idx)
         
         # For memory efficiency, process in chunks if needed
         chunk_size = min(1024, N_tgt)
@@ -62,6 +60,8 @@ class KNNCache:
             
             all_dist.append(dist)
             all_idx.append(idx)
+
+            del dist, local_idx, idx, chunk_distances
         
         return torch.cat(all_idx, dim=1), torch.cat(all_dist, dim=1)
     
