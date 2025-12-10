@@ -221,6 +221,9 @@ class SegmentClass:
 
         for (voxel_idx, noise) in pbar0:
 
+            if voxel_idx.shape[0] == 0:
+                continue
+
             voxel = points[voxel_idx]
             voxel0 = voxel.copy()
 
@@ -266,6 +269,8 @@ class SegmentClass:
         voxel_all = voxel_all[~mask0]
         voxel_probs_all = voxel_probs_all[~mask1]
 
+        del voxel_probs, voxel, voxel0, voxel_idx
+
         return voxel_all, voxel_probs_all
     
 
@@ -285,7 +290,9 @@ class SegmentClass:
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
                                                                shuffle=False):
-            
+            if indices.shape[0] == 0:
+                continue
+
             points_chunk = points[indices]
             points_chunk -= points_chunk.mean(axis = 0)
 

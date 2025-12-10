@@ -349,7 +349,8 @@ class RandLANet(nn.Module):
         for i, lfa in enumerate(self.encoder):
 
             # at iteration i, x.shape = (B, N//(d**i), d_in)
-            x = lfa(torch.arange((N//decimation_ratio), device=coords.device), self.KNN, x)
+            current_indices = torch.arange(N//decimation_ratio, device=coords.device)
+            x = lfa(current_indices, self.KNN, x)
             x_stack.append(x)
             decimation_ratio *= d
             x = x[:,:,:N//decimation_ratio]
@@ -368,9 +369,11 @@ class RandLANet(nn.Module):
             #     coords[:,:d*N//decimation_ratio].contiguous(),
             #     self._num_neighbors_upsample
             # )
+            down_indices = torch.arange(N//decimation_ratio, device=coords.device)
+            up_indices = torch.arange(d*N//decimation_ratio, device=coords.device)
             neighbors, distances = self.KNN.query(
-                torch.arange(N//decimation_ratio),
-                torch.arange(d*N//decimation_ratio),
+                down_indices,
+                up_indices,
                 self._num_neighbors_upsample
             )
 
@@ -447,7 +450,7 @@ def test_model():
     dummy_input = torch.randn(batch_size, num_points, model_config['d_in']).to(torch.device('cuda'))
 
     model = RandLANet(model_config=model_config, num_classes=num_classes).to(torch.device('cuda'))
-    summary(model, input_size=dummy_input.shape)
+    # summary(model, input_size=dummy_input.shape)
 
     # test output
     output = model(dummy_input)
