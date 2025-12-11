@@ -30,8 +30,8 @@ class Dataset(IterableDataset):
                  num_points: int = 4096,
                  batch_size: int = 1,
                  shuffle: bool = True,
-                 weights: torch.Tensor = Optional[torch.Tensor],
-                 device: torch.device = Optional[torch.device('cpu')]):
+                 weights: Optional[torch.Tensor] = None,
+                 device: Optional[torch.device] = torch.device('cpu')):
 
         super(Dataset).__init__()
 
@@ -77,6 +77,32 @@ class Dataset(IterableDataset):
         noise = noise.to(cloud.device)
         return cloud + noise
 
+    def _balance_point_cloud(self, cloud_tensor, labels_tensor):
+        """
+        Resample points within a point cloud to balance classes.
+        This is done per-cloud, maintaining streaming property.
+        """
+        
+        # Compute per-point sampling weights based on their class
+        point_weights = self.class_sample_weights[labels_tensor.long()]
+        
+        # Normalize to valid probabilities
+        point_weights = point_weights / point_weights.sum()
+        
+        # Sample with replacement according to weights
+        try:
+            indices = torch.multinomial(point_weights, 
+                                       self.num_points, 
+                                       replacement=True)
+            
+            cloud_tensor = cloud_tensor[indices]
+            labels_tensor = labels_tensor[indices]
+        except RuntimeError:
+            # Fallback if multinomial fails (shouldn't happen but safety)
+            pass
+        
+        return cloud_tensor, labels_tensor
+
     def _process_cloud(self):
 
 
@@ -100,7 +126,10 @@ class Dataset(IterableDataset):
                 features_tensor = features_tensor[idx]
                 labels_tensor = labels_tensor[idx]
 
-
+            if self.weights is not None and self.shuffle:
+                weights_tensor = self.weights[labels_tensor] # 
+                weights_tensor = weights_tensor.cpu()
+                cloud_tensor, labels_tensor = self._balance_point_cloud(cloud_tensor, labels_tensor)
 
             if self.shuffle:
                 cloud_tensor = cloud_tensor.to(self.device)
