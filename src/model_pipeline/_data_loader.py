@@ -98,6 +98,8 @@ class Dataset(IterableDataset):
             if self.sampling_weights is None:
                 return cloud_tensor, features_tensor, labels_tensor
             
+
+            self.weights.to(cloud_tensor.device)
             # Get per-point sampling weights based on their class
             point_weights = self.sampling_weights[labels_tensor.long()]
             
@@ -149,7 +151,7 @@ class Dataset(IterableDataset):
             if self.weights is not None and self.shuffle:
                 weights_tensor = self.weights[labels_tensor] # 
                 weights_tensor = weights_tensor.cpu()
-                cloud_tensor, labels_tensor = self._balance_point_cloud(cloud_tensor, features_tensor, labels_tensor)
+                cloud_tensor, features_tensor, labels_tensor = self._balance_point_cloud(cloud_tensor, features_tensor, labels_tensor)
 
             if self.shuffle:
                 cloud_tensor = cloud_tensor.to(self.device)
