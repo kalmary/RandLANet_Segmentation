@@ -124,11 +124,11 @@ def eval_model_front(config_dict: dict,
     print('Plots saved to:', plot_dir)
     print('='*20)
     
-    plotter = Plotter(class_num=config_dict['num_classes'], plots_dir=plot_dir)
+    # plotter = Plotter(class_num=config_dict['num_classes'], plots_dir=plot_dir)
     
-    plotter.roc_curve(f'roc_{model_name}.png', all_labels, all_probs)
-    plotter.prc_curve(f'prc_{model_name}.png', all_labels, all_probs)
-    plotter.cnf_matrix(f'cnf_{model_name}.png', all_labels, all_predictions)
+    # plotter.roc_curve(f'roc_{model_name}.png', all_labels, all_probs)
+    # plotter.prc_curve(f'prc_{model_name}.png', all_labels, all_probs)
+    # plotter.cnf_matrix(f'cnf_{model_name}.png', all_labels, all_predictions)
 
     miou_report = f'mIoU: {miou}\nIoU per class: {avg_iou_pc}'
     ClassificationReport(file_path=plot_dir.joinpath(f'classification_report_{model_name}.txt'),

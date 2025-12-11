@@ -69,6 +69,34 @@ def train_model(training_dict: dict,):
                                                 total=total_v, 
                                                 device=device_loss,
                                                 verbose=False)
+        
+        train_dataset = Dataset(base_dir=training_dict['data_path_train'],
+                                    num_points=training_dict['num_points'],
+                                    batch_size=training_dict['batch_size'],
+                                    shuffle=True,
+                                    weights=class_weights_t,
+                                    device=device_loader)
+
+        trainLoader = DataLoader(train_dataset,
+                                batch_size=None,
+                                num_workers = 10,
+                                pin_memory=True)
+        
+
+
+
+        val_dataset = Dataset(base_dir=training_dict['data_path_val'],
+                                        num_points=training_dict['num_points'],
+                                        batch_size=training_dict['batch_size'],
+                                        shuffle=False,
+                                        weights=class_weights_v,
+                                        device=device_loader)
+
+        valLoader = DataLoader(val_dataset,
+                                batch_size=None,
+                                num_workers = 10,
+                                pin_memory=True)
+
 
 
         if training_dict['model'] is None:

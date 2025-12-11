@@ -31,6 +31,7 @@ class Dataset(IterableDataset):
                  batch_size: int = 1,
                  shuffle: bool = True,
                  weights: Optional[torch.Tensor] = None,
+                 oversample_power: float = 1.5,
                  device: Optional[torch.device] = torch.device('cpu')):
 
         super(Dataset).__init__()
@@ -43,6 +44,16 @@ class Dataset(IterableDataset):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.weights = weights
+
+        # Process weights for sampling if provided
+        if weights is not None and oversample_power != 1.0:
+            # Apply power to make oversampling more/less aggressive
+            sampling_weights = torch.pow(weights, oversample_power)
+            # Re-normalize
+            sampling_weights = sampling_weights / sampling_weights.sum()
+            self.sampling_weights = sampling_weights
+        else:
+            self.sampling_weights = weights
 
     def _key_streamer(self):
         """
@@ -77,36 +88,45 @@ class Dataset(IterableDataset):
         noise = noise.to(cloud.device)
         return cloud + noise
 
-    def _balance_point_cloud(self, cloud_tensor, labels_tensor):
-        """
-        Resample points within a point cloud to balance classes.
-        This is done per-cloud, maintaining streaming property.
-        """
-        
-        # Compute per-point sampling weights based on their class
-        point_weights = self.class_sample_weights[labels_tensor.long()]
-        
-        # Normalize to valid probabilities
-        point_weights = point_weights / point_weights.sum()
-        
-        # Sample with replacement according to weights
-        try:
-            indices = torch.multinomial(point_weights, 
-                                       self.num_points, 
-                                       replacement=True)
+    def _balance_point_cloud(self, cloud_tensor, features_tensor, labels_tensor):
+            """
+            Resample points within a point cloud to balance classes using provided weights.
             
-            cloud_tensor = cloud_tensor[indices]
-            labels_tensor = labels_tensor[indices]
-        except RuntimeError:
-            # Fallback if multinomial fails (shouldn't happen but safety)
-            pass
-        
-        return cloud_tensor, labels_tensor
+            Returns:
+                Resampled cloud_tensor, features_tensor, labels_tensor (all same length)
+            """
+            if self.sampling_weights is None:
+                return cloud_tensor, features_tensor, labels_tensor
+            
+            # Get per-point sampling weights based on their class
+            point_weights = self.sampling_weights[labels_tensor.long()]
+            
+            # Normalize to valid probabilities
+            point_weights = point_weights / (point_weights.sum() + 1e-10)
+            
+            # Sample with replacement according to weights
+            try:
+                num_samples = min(self.num_points, len(labels_tensor))
+                indices = torch.multinomial(
+                    point_weights, 
+                    num_samples, 
+                    replacement=True
+                )
+                
+                # Apply same indices to all tensors
+                cloud_tensor = cloud_tensor[indices]
+                features_tensor = features_tensor[indices]
+                labels_tensor = labels_tensor[indices]
+                
+            except RuntimeError as e:
+                # Fallback if multinomial fails (rare edge case)
+                print(f"Warning: Point cloud resampling failed: {e}")
+                pass
+            
+            return cloud_tensor, features_tensor, labels_tensor
 
     def _process_cloud(self):
 
-
-        retry_count = 0
 
         for cloud in self._key_streamer():
             cloud_tensor = cloud[:, :3]
@@ -129,7 +149,7 @@ class Dataset(IterableDataset):
             if self.weights is not None and self.shuffle:
                 weights_tensor = self.weights[labels_tensor] # 
                 weights_tensor = weights_tensor.cpu()
-                cloud_tensor, labels_tensor = self._balance_point_cloud(cloud_tensor, labels_tensor)
+                cloud_tensor, labels_tensor = self._balance_point_cloud(cloud_tensor, features_tensor, labels_tensor)
 
             if self.shuffle:
                 cloud_tensor = cloud_tensor.to(self.device)
