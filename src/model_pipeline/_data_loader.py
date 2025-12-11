@@ -34,7 +34,8 @@ class Dataset(IterableDataset):
                  class_balanced_sampling: bool = False,
                  oversample_factor: float = 2.0,
                  augment_minority: bool = False,
-                 minority_threshold: float = 0.05):
+                 minority_threshold: float = 0.05,
+                 verbose = False):
         """
         Args:
             class_balanced_sampling: If True, oversample points from minority classes
@@ -63,6 +64,8 @@ class Dataset(IterableDataset):
         self.class_sample_weights = None
         self.minority_classes = None
 
+        self.verbose = verbose
+
     def _compute_class_statistics(self):
         """
         Compute class distribution (streaming - doesn't load all data).
@@ -71,7 +74,8 @@ class Dataset(IterableDataset):
         class_counts = Counter()
         total_points = 0
         
-        print("Computing class statistics for balanced sampling...")
+        if self.verbose:
+            print("Computing class statistics for balanced sampling...")
         
         with h5py.File(self.path, 'r') as h_file:
             keys = list(h_file.keys())
@@ -105,13 +109,16 @@ class Dataset(IterableDataset):
         # Identify minority classes
         self.minority_classes = set(np.where(class_frequencies < self.minority_threshold)[0])
         
-        print(f"\nClass distribution:")
+        if self.verbose:
+            print(f"\nClass distribution:")
         for cls in range(num_classes):
             if cls in class_counts:
                 freq = class_frequencies[cls]
-                is_minority = "MINORITY" if cls in self.minority_classes else ""
-                print(f"  Class {cls}: {class_counts[cls]:8d} points ({freq*100:5.2f}%) "
-                      f"weight={weights[cls]:.4f} {is_minority}")
+                
+                if self.verbose:
+                    is_minority = "MINORITY" if cls in self.minority_classes else ""
+                    print(f"  Class {cls}: {class_counts[cls]:8d} points ({freq*100:5.2f}%) "
+                        f"weight={weights[cls]:.4f} {is_minority}")
 
     def _key_streamer(self):
         """

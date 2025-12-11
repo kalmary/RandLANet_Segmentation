@@ -31,7 +31,11 @@ def train_model(training_dict: dict,):
                                       num_points=training_dict['num_points'],
                                       batch_size=training_dict['batch_size'],
                                       shuffle=True,
-                                      device=device_loader)
+                                      device=device_loader,
+                                      class_balanced_sampling=True,
+                                      oversample_factor=2.,
+                                      augment_minority=False,
+                                      minority_threshold=0.15)
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
@@ -45,7 +49,8 @@ def train_model(training_dict: dict,):
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
                                     shuffle=False,
-                                    device=device_loader)
+                                    device=device_loader,
+                                    class_balanced_sampling=False)
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,
@@ -54,16 +59,18 @@ def train_model(training_dict: dict,):
 
     total_t = get_dataset_len(trainLoader)
     total_v = get_dataset_len(valLoader)
-    class_weights_t = calculate_class_weights(trainLoader, 
-                                              training_dict['num_classes'], 
-                                              total_t, 
-                                              device=device_loss,
+    class_weights_t = calculate_class_weights(loader=trainLoader,
+                                              num_classes=training_dict['num_classes'],
+                                              method='effective',
+                                              total = total_t,
+                                              device=device_loader,
                                               verbose=False)
     
-    class_weights_v = calculate_class_weights(valLoader,
-                                              training_dict['num_classes'],
-                                              total_v,
-                                              device=device_loss,
+    class_weights_v = calculate_class_weights(loader=valLoader,
+                                              num_classes=training_dict['num_classes'],
+                                              method='effective',
+                                              total = total_v,
+                                              device=device_loader,
                                               verbose=False)
 
 
