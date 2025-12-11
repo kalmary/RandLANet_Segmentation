@@ -235,9 +235,7 @@ class RandLANet(nn.Module):
         self.fc_start = nn.Linear(d_in, fc_start_d_out)
         self.bn_start = nn.Sequential(
             nn.BatchNorm2d(fc_start_d_out, eps=1e-6, momentum=0.99),
-            nn.LeakyReLU(negative_slope=0.2, inplace=False)
-            
-            # nn.Tanh()
+            nn.SiLU()
         )
 
         # encoding layers - build from config
