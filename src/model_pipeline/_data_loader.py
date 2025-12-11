@@ -44,7 +44,6 @@ class Dataset(IterableDataset):
         self.weights = weights
         
         # Class balancing parameters
-        self.class_balanced_sampling = class_balanced_sampling
         self.oversample_factor = oversample_factor
         self.augment_minority = augment_minority
         self.minority_threshold = minority_threshold
