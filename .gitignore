@@ -165,7 +165,7 @@ cython_debug/
 
 ##### project related
 
-**/model_pipeline/logs/
+**/logs/
 **/training_results/
 **/final_files/
 **/db.sqlite3
