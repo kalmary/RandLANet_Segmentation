@@ -422,6 +422,7 @@ def objective_function(trial: optuna.Trial,
     batch_size = trial.suggest_int('batch_size', exp_config['batch_size'][0], exp_config['batch_size'][1], step=exp_config['batch_size'][2])
     epochs = trial.suggest_int('epochs', exp_config['epochs'][0], exp_config['epochs'][1], step=exp_config['epochs'][2] )
     focal_loss_gamma = trial.suggest_float('focal_loss_gamma', exp_config['focal_loss_gamma'][0], exp_config['focal_loss_gamma'][1], step=exp_config['focal_loss_gamma'][2])
+
     pc_start = trial.suggest_float('pc_start', exp_config['pc_start'][0], exp_config['pc_start'][1], step=exp_config['pc_start'][2])
     div_factor = trial.suggest_int('div_factor', exp_config['div_factor'][0], exp_config['div_factor'][1], log=True)
     fin_div_factor = trial.suggest_int('final_div_factor', exp_config['final_div_factor'][0], exp_config['final_div_factor'][1], log=True)
