@@ -20,7 +20,7 @@ from utils import wrap_hist
 
 from tqdm import tqdm
 
-def train_model(training_dict: dict,):
+def train_model(training_dict: dict):
     device_gpu = torch.device('cuda')
     device_cpu = torch.device('cpu')
 
