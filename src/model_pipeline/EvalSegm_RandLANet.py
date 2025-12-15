@@ -105,7 +105,7 @@ def eval_model_front(config_dict: dict,
 
     plot_dir = paths[1]
 
-    total_loss, all_labels, all_probs, all_predictions  = _eval_model(config_dict=config_dict,
+    total_loss, all_labels, all_predictions  = _eval_model(config_dict=config_dict,
                                                                                       model=model)
     
     miou, avg_iou_pc = compute_mIoU(torch.asarray(all_predictions), torch.asarray(all_labels), config_dict['num_classes'])
@@ -114,7 +114,6 @@ def eval_model_front(config_dict: dict,
     print('MODEL TESTED')
     print('Model path', model_path)
     print('Loss: ', total_loss)
-    print('ACCURACY: ', total_accuracy)
     print('mIoU: ', miou)
     print('IoU per class: ', avg_iou_pc)
     print('Plots saved to:', plot_dir)
