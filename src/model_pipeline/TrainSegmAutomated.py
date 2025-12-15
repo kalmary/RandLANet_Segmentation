@@ -494,7 +494,7 @@ def objective_function(trial: optuna.Trial,
         logger.info(f'Epoch {epoch_idx+1}/{exp_config["epochs"]}: best_val_acc: {best_val_accuracy:.3f}, best_val_loss: {best_val_loss:.3f}, best_val_miou: {best_val_miou:.3f}, final_val: {final_val:.3f}')
 
         # report acutal results for prunning
-        
+        trial.report(final_val, step=epoch_idx)
 
         if trial.should_prune():
             logger.info(f'Pruning trial: {trial.number}')
