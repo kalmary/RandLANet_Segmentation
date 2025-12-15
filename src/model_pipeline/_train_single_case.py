@@ -33,11 +33,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                       num_points=training_dict['num_points'],
                                       batch_size=training_dict['batch_size'],
                                       shuffle=True,
-                                      device=device_loader,
-                                      class_balanced_sampling=True,
-                                      oversample_factor=2.,
-                                      augment_minority=False,
-                                      minority_threshold=0.15)
+                                      device=device_loader)
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
@@ -51,8 +47,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
                                     shuffle=False,
-                                    device=device_loader,
-                                    class_balanced_sampling=False)
+                                    device=device_loader)
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,

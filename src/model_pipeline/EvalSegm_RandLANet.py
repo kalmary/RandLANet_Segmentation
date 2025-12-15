@@ -76,15 +76,11 @@ def _eval_model(config_dict: dict,
 
             loss = criterion(outputs, batch_y)
             
-            accuracy = calculate_weighted_accuracy(outputs, batch_y, weights=weights)
-            
             loss_per_epoch += loss.item()*batch_y.size(0)
-            accuracy_per_epoch += accuracy * batch_y.size(0)
 
             epoch_samples += batch_y.size(0)
 
             total_loss = loss_per_epoch / epoch_samples
-            total_accuracy = accuracy_per_epoch / epoch_samples
 
 
             all_labels.extend(batch_y.cpu().tolist())
@@ -98,7 +94,7 @@ def _eval_model(config_dict: dict,
             all_probs = np.concatenate([all_probs, probs.reshape(-1, config_dict['num_classes'])], axis=0)
             all_predictions.extend(int_preds)
 
-    return total_loss, total_accuracy, np.asarray(all_labels), all_probs.reshape(-1, config_dict['num_classes']), np.asarray(all_predictions)
+    return total_loss, np.asarray(all_labels), all_probs.reshape(-1, config_dict['num_classes']), np.asarray(all_predictions)
 
 def eval_model_front(config_dict: dict,
          model: nn.Module,
@@ -109,7 +105,7 @@ def eval_model_front(config_dict: dict,
 
     plot_dir = paths[1]
 
-    total_loss, total_accuracy, all_labels, all_probs, all_predictions  = _eval_model(config_dict=config_dict,
+    total_loss, all_labels, all_probs, all_predictions  = _eval_model(config_dict=config_dict,
                                                                                       model=model)
     
     miou, avg_iou_pc = compute_mIoU(torch.asarray(all_predictions), torch.asarray(all_labels), config_dict['num_classes'])
@@ -124,11 +120,6 @@ def eval_model_front(config_dict: dict,
     print('Plots saved to:', plot_dir)
     print('='*20)
     
-    # plotter = Plotter(class_num=config_dict['num_classes'], plots_dir=plot_dir)
-    
-    # plotter.roc_curve(f'roc_{model_name}.png', all_labels, all_probs)
-    # plotter.prc_curve(f'prc_{model_name}.png', all_labels, all_probs)
-    # plotter.cnf_matrix(f'cnf_{model_name}.png', all_labels, all_predictions)
 
     miou_report = f'mIoU: {miou}\nIoU per class: {avg_iou_pc}'
     ClassificationReport(file_path=plot_dir.joinpath(f'classification_report_{model_name}.txt'),
