@@ -19,8 +19,10 @@ from utils import calculate_class_weights, get_dataset_len, FocalLoss_ArcFace, F
 from utils import wrap_hist
 
 from tqdm import tqdm
+from typing import Union, Generator
 
-def train_model(training_dict: dict):
+def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], None, None],
+                                              Generator[tuple[None, dict], None, None]]:
     device_gpu = torch.device('cuda')
     device_cpu = torch.device('cpu')
 
