@@ -154,7 +154,7 @@ class Dataset(IterableDataset):
 
             if self.shuffle:
                 cloud_tensor = cloud_tensor.to(self.device)
-                cloud_tensor = self._add_gaussian_noise(cloud_tensor, std=0.015)
+                cloud_tensor = self._add_gaussian_noise(cloud_tensor, std=0.05)
                 cloud_tensor = rotate_points(cloud_tensor, device=self.device)
                 cloud_tensor = tilt_points(cloud_tensor,
                                            max_x_tilt_degrees=5,
