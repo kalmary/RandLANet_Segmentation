@@ -514,7 +514,7 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
 
     # able to automatically stop poor working exps
     n_startup = 3
-    n_warmup_steps = 25
+    n_warmup_steps = 15
     interval_steps = 5
 
     pruner = optuna.pruners.MedianPruner(n_startup_trials=n_startup, n_warmup_steps=n_warmup_steps, interval_steps=interval_steps)
