@@ -64,8 +64,8 @@ class SegmentClass:
 
         return model
     
-    def _init_scaler(self, data: np.ndarray) -> MinMaxScaler:
-        self._scaler = MinMaxScaler()
+    def _init_scaler(self, feature_range: list[int] = [0, 10]) -> MinMaxScaler:
+        self._scaler = MinMaxScaler(feature_range)
         return self._scaler
     
     @property
