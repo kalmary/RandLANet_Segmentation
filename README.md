@@ -185,7 +185,7 @@ import numpy as np
 segment_clas = SegmentClass(voxel_size_big=np.array([100., 100.],),
                             overlap = 0.4,                       # float
                             model_name=model_name,              # str
-                            config_dir="./final_files           # str or pth.Path
+                            config_dir="./final_files",         # str or pth.Path
                             device=device,                      # torch.device
                             pbar_bool = kwargs.get('verbose'))  # bool
 
