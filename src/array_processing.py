@@ -21,6 +21,7 @@ class SegmentClass:
                  voxel_size_big: Optional[float] = None,
                  overlap: float = 0.4,
                  model_name: str = None,
+                 config_dir: Union[str, pth.Path] = "./final_files",
                  device: torch.device = torch.device('cpu'),
                  pbar_bool: bool = False):
         
@@ -38,8 +39,8 @@ class SegmentClass:
         self.pbar_bool = pbar_bool
 
         self._scaler = None
-        self._model_config = None
-        self._model = None
+        self._model_config = self._load_config(config_dir)
+        self._model = self._load_segmModel(config_dir)
 
 
     # TODO adjust model loading 

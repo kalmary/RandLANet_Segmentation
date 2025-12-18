@@ -182,10 +182,12 @@ import numpy as np
 # voxel_size 100. is what we found to be optimal
 # you can modify voxel_size for your needs - lower for denser clouds
 
-segment_clas = SegmentClass(voxel_size_big=np.array([100., 100.],), 
-                             model_name=model_name,              # str
-                             device=device,                      # torch.device
-                             pbar_bool = kwargs.get('verbose'))  # bool
+segment_clas = SegmentClass(voxel_size_big=np.array([100., 100.],),
+                            overlap = 0.4,                       # float
+                            model_name=model_name,              # str
+                            config_dir="./final_files           # str or pth.Path
+                            device=device,                      # torch.device
+                            pbar_bool = kwargs.get('verbose'))  # bool
 
 pcd = np.random.random(size = (10e6, 3))*100 # swap with actual point cloud
 
