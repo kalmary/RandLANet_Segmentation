@@ -65,6 +65,36 @@ def iter_files(**kwargs):
         laz.classification = labels
         laz.write(new_path)
 
+def test(**kwargs):
+
+    device = kwargs.get('device')
+    device = torch.device(device) if (device != 'cpu' and torch.cuda.is_available is True) else torch.device('cpu')
+    verbose = kwargs.get('verbose')
+
+    # check if Segment Class loads properly:
+    segment_class = None
+    try:
+        segment_class = SegmentClass(voxel_size_big=np.array([100., 100.]),
+                                    model_name=kwargs.get('model_name'),
+                                    device=device,
+                                    pbar_bool=kwargs.get('verbose'))
+    except Exception as e:
+        print(e)
+    
+    assert segment_class is None, "Segmentation Class didn't load properly."
+
+    input_path = pth.Path(kwargs.get(input_path))
+    assert not input_path.exists(), "Input path with .laz files doesn't exist."
+    assert not input_path.is_dir(), "Input path is not a directory."
+    
+    num_files = 0
+    for file_path in input_path.rglob(f'*{kwargs.get('pcd_extension')}'):
+        if file_path.is_file():
+            num_files+=1
+    assert num_files == 0, "Input path directory is empty."
+
+    
+
         
 
 
@@ -153,6 +183,12 @@ def main():
     # args to dict
     args_dict = vars(args)
     args_dict['pcd_extension'] = '.laz'
+
+    if args.mode == 0:
+        test(args_dict)
+    else:
+        iter_files(args_dict)
+    
     
 
     

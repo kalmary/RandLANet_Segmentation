@@ -39,12 +39,14 @@ class SegmentClass:
         self.pbar_bool = pbar_bool
 
         self._scaler = None
+        if config_dir is None:
+            config_dir = "./final_files"
         self._model_config = self._load_config(config_dir)
         self._model = self._load_segmModel(config_dir)
 
 
     # TODO adjust model loading 
-    def _load_config(self, config_dir: Union[pth.Path, str] = './final_files') -> dict:
+    def _load_config(self, config_dir: Optional[Union[pth.Path, str]] = None) -> dict:
 
         config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
         config_dict = load_json(config_path)
