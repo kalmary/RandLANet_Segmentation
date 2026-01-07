@@ -381,9 +381,9 @@ def case_based_training(exp_configs: list[dict],
         logger.info(f'Case {i+1}/{len(exp_configs)}: {exp_config}')
 
         for model, result_hist in train_model(training_dict=exp_config):
-            logger.info(f'Single model was generated. val_acc: {result_hist["val_acc"][-1]:.3f}  val_loss: {result_hist["val_loss"][-1]:.3f}')
+            logger.info(f'Single model was generated. val_acc: {result_hist["acc_v_hist"][-1]:.3f}  val_loss: {result_hist["loss_v_hist"][-1]:.3f}')
 
-            final_val = result_hist['val_acc'][-1]*0.6 + (1 / (1 + result_hist['val_loss'][-1]))*0.4
+            final_val = result_hist['acc_v_hist'][-1]*0.6 + (1 / (1 + result_hist['loss_v_hist'][-1]))*0.4
 
             model, best_config, config_path, result_hist = checkpoint.check_checkpoint(model, model_name, final_val, exp_config, result_hist)
     
@@ -584,7 +584,7 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
 
     print('Training the best model last time: ')
 
-    case_based_training(final_exp_config,
+    case_based_training([final_exp_config],
                         model_name=model_name) # FIXME inproper dict creation
     
     logger.info(f'STOP: optuna_based_training')

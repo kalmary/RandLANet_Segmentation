@@ -16,7 +16,7 @@ import os
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from utils import rotate_points, tilt_points, transform_points
+from utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -83,10 +83,7 @@ class Dataset(IterableDataset):
 
                 yield from data
 
-    def _add_gaussian_noise(self, cloud, std=0.01):
-        noise = torch.randn_like(cloud) * std
-        noise = noise.to(cloud.device)
-        return cloud + noise
+
 
     def _balance_point_cloud(self, cloud_tensor, features_tensor, labels_tensor):
             """
@@ -154,7 +151,7 @@ class Dataset(IterableDataset):
 
             if self.shuffle:
                 cloud_tensor = cloud_tensor.to(self.device)
-                cloud_tensor = self._add_gaussian_noise(cloud_tensor, std=0.05)
+                cloud_tensor = add_gaussian_noise(cloud_tensor, std=0.05)
                 cloud_tensor = rotate_points(cloud_tensor, device=self.device)
                 cloud_tensor = tilt_points(cloud_tensor,
                                            max_x_tilt_degrees=5,
