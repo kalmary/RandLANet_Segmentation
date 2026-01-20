@@ -185,9 +185,9 @@ def convert_dataset(work_dir: pth.Path, goal_dir: pth.Path) -> tuple[pth.Path, p
                 chunk2save = np.zeros((0, chunk_num_point, 5))
                 chunk_num += 1
 
-            if chunk2save.shape[0] > 0:
-                h5_file.create_dataset(str(chunk_num), data=chunk2save)
-            h5_file.close()
+        if chunk2save.shape[0] > 0:
+            h5_file.create_dataset(str(chunk_num), data=chunk2save)
+        h5_file.close()
 
     convert2_h5(train_paths, 0)
     convert2_h5(test_paths, 1)
