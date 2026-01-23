@@ -58,7 +58,7 @@ class SegmentClass:
     def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
 
         path2model = pth.Path(model_dir).joinpath(self.model_name)
-        model = RandLANet.from_config_file(self._model_config, self._model_config['num_classes'])
+        model = RandLANet(self._model_config, self._model_config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
                                             device=self.device)
