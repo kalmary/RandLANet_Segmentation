@@ -18,10 +18,10 @@ from utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
     def __init__(self,
-                 voxel_size_big: Optional[float] = None,
+                 voxel_size_big: float = 200.,
                  overlap: float = 0.4,
                  model_name: str = None,
-                 config_dir: Union[str, pth.Path] = "./final_files",
+                 config_dir: Union[str, pth.Path] = "final_files",
                  device: torch.device = torch.device('cpu'),
                  pbar_bool: bool = False):
         
@@ -39,10 +39,12 @@ class SegmentClass:
         self.pbar_bool = pbar_bool
 
         self._scaler = None
-        if config_dir is None:
-            config_dir = "./final_files"
+        
+        self.base_path = pth.Path(__file__).parent
+        config_dir = self.base_path.joinpath(config_dir)
         self._model_config = self._load_config(config_dir)
         self._model = self._load_segmModel(config_dir)
+        self._scaler = self._init_scaler()
 
 
     # TODO adjust model loading 
@@ -58,15 +60,16 @@ class SegmentClass:
     def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
 
         path2model = pth.Path(model_dir).joinpath(self.model_name)
-        model = RandLANet(self._model_config, self._model_config['num_classes'])
+        model = RandLANet(self._model_config["model_config"], self._model_config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
                                             device=self.device)
+        self._model.eval()
     
 
         return model
     
-    def _init_scaler(self, feature_range: list[int] = [0, 10]) -> MinMaxScaler:
+    def _init_scaler(self, feature_range: Tuple[int] = (0, 10)) -> MinMaxScaler:
         self._scaler = MinMaxScaler(feature_range)
         return self._scaler
     
@@ -204,6 +207,16 @@ class SegmentClass:
                 shm_points_probs.close()
                 shm_points_probs.unlink()
     
+    def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
+
+        voxel = torch.from_numpy(voxel).float().to(self.device)
+        voxel = voxel.unsqueeze(dim = 0)
+        with torch.no_grad():
+            voxel_probs = self._model(voxel)
+        voxel_probs = voxel_probs.permute(0, 2, 1).squeeze(dim = 0).cpu().numpy()
+
+        return voxel_probs
+
     def _segment_voxel_base(self,
                              points: np.ndarray,
                              intensity: np.ndarray):
@@ -218,7 +231,7 @@ class SegmentClass:
                                                             num_points = self.model_config['num_points'],
                                                             overlap_ratio=0.4)
         if self.pbar_bool:
-            pbar0 = tqdm(generator, desc="Points classification", unit="voxel", leave=False)
+            pbar0 = tqdm(generator, desc="Points classification", unit=" voxel", leave=False)
         else:
             pbar0 = generator
 
@@ -241,15 +254,14 @@ class SegmentClass:
 
             checksum += voxel_idx.shape[0]
             if self.pbar_bool:
+                pbar0.update(1)
                 pbar0.set_postfix({"Number of processed points": checksum})
 
             voxel = np.concatenate([voxel, intensity_voxel.reshape(-1, 1)], axis = 1)
 
             if not noise:
 
-                voxel = torch.from_numpy(voxel).to(self.device)
-                voxel = voxel.unsqueeze(dim = 0)
-                voxel_probs = self._model(voxel)
+                voxel_probs = self._model_predict(voxel)
 
                 assert voxel_probs.shape[0] == voxel.shape[0]
 
@@ -278,7 +290,7 @@ class SegmentClass:
     
 
     def _segment_small_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
-
+    
         voxel_all, voxel_probs_all = self._segment_voxel_base(points, intensity)
         labels = self._upsample_labeled_chunk_parallel(voxel_all, voxel_probs_all, points)
 
@@ -309,11 +321,12 @@ class SegmentClass:
             labels[indices] = labels_chunk
 
         return labels
-    
 
     def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 20*10e6) -> np.ndarray:
 
-        intensity = self._scaler.fit_transform(intensity)
+        intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
+        intensity = intensity.flatten()
+
         points -= points.mean(axis = 0)
 
         num_points = points.shape[0]
@@ -325,12 +338,25 @@ class SegmentClass:
         return labels
 
         
+def test_segm():
+    path2laz = "/home/michal-siniarski/Dokumenty/Z32/LAS/TREE_SEGM/automatically_segmented_data/O1W.laz"
+
+    import laspy
+
+    las = laspy.read(path2laz)
+    points = np.vstack((las.x, las.y, las.z)).transpose()
+    intensity = np.asarray(las.intensity)
+
+    segmenter = SegmentClass(model_name="RandLANetV3_2",
+                             device = torch.device('cuda'),
+                             pbar_bool = True)
+    segmenter.segment_pcd(points=points,
+                          intensity=intensity)
 
 
 
 
-
-
-    
+if __name__ == '__main__':
+    test_segm()
 
 
