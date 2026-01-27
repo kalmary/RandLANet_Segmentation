@@ -302,7 +302,7 @@ class SegmentClass:
         labels = np.zeros(intensity.shape, dtype=np.int32)
 
         for indices in pcd_manipulation.voxelGridFragmentation(data=points,
-                                                               num_points=self._model_config['num_points'],
+                                                               num_points=0,
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
                                                                shuffle=False):
