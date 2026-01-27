@@ -299,6 +299,7 @@ class SegmentClass:
 
 
     def _segment_big_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
+        labels = np.zeros(intensity.shape, dtype=np.int32)
 
         for indices in pcd_manipulation.voxelGridFragmentation(data=points,
                                                                num_points=self._model_config['num_points'],
@@ -311,13 +312,9 @@ class SegmentClass:
             points_chunk = points[indices]
             points_chunk -= points_chunk.mean(axis = 0)
 
-            labels = np.zeros(intensity.shape, dtype=np.int32)
-
             intensity_chunk = intensity[indices]
 
-            voxel_chunk, voxel_probs_chunk = self._segment_small_voxel(points_chunk, intensity_chunk)
-            labels_chunk = self._upsample_labeled_chunk_parallel(voxel_chunk, voxel_probs_chunk, points_chunk)
-
+            labels_chunk = self._segment_small_voxel(points_chunk, intensity_chunk)
             labels[indices] = labels_chunk
 
         return labels
