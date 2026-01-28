@@ -339,7 +339,9 @@ def test_segm():
     path2laz = "/home/michal-siniarski/Dokumenty/Z32/LAS/TREE_SEGM/automatically_segmented_data/O1W.laz"
 
     import laspy
+    import pathlib as pth
 
+    path2laz = pth.Path(path2laz)
     las = laspy.read(path2laz)
     points = np.vstack((las.x, las.y, las.z)).transpose()
     intensity = np.asarray(las.intensity)
@@ -347,7 +349,7 @@ def test_segm():
     segmenter = SegmentClass(model_name="RandLANetV3_2",
                              device = torch.device('cuda'),
                              pbar_bool = True)
-    segmenter.segment_pcd(points=points,
+    labels = segmenter.segment_pcd(points=points,
                           intensity=intensity)
 
 
