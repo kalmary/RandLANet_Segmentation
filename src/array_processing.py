@@ -201,11 +201,14 @@ class SegmentClass:
             return points_labels.flatten()
 
         finally:
-            # 6. resources cleanup
-            if shm_points_probs:
-                # clean resource in process which made the resource
-                shm_points_probs.close()
-                shm_points_probs.unlink()
+            if shm_points_probs is not None:
+                try:
+                    shm_points_probs.close()
+                    import time
+                    time.sleep(0.1)  # Give workers time to finish cleanup
+                    shm_points_probs.unlink()
+                except FileNotFoundError:
+                    pass
     
     def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
 
