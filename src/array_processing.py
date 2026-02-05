@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 
 
-from model_pipeline.RandLANet_CB import RandLANet
+from final_files.RandLANet_CB import RandLANet
 from utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
@@ -23,7 +23,7 @@ class SegmentClass:
                  model_name: str = None,
                  config_dir: Union[str, pth.Path] = "final_files",
                  device: torch.device = torch.device('cpu'),
-                 pbar_bool: bool = False):
+                 verbose: bool = False):
         
         self.voxel_size_small = None
         self.voxel_size_big = voxel_size_big
@@ -36,7 +36,7 @@ class SegmentClass:
             self.device = torch.device(device)
         self.device = device
 
-        self.pbar_bool = pbar_bool
+        self.verbose = verbose
 
         self._scaler = None
         
@@ -135,7 +135,7 @@ class SegmentClass:
                                         k_neighbors_upsampling: int = 14,
                                         distance_sigma: float = 0.35,
                                         num_workers: int = -1,
-                                        pbar: bool = None) -> np.array:
+                                        verbose: bool = None) -> np.array:
         
         shm_points_probs: Optional[shared_memory.SharedMemory] = None
         
@@ -233,7 +233,7 @@ class SegmentClass:
                                                             voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
                                                             num_points = self.model_config['num_points'],
                                                             overlap_ratio=0.4)
-        if self.pbar_bool:
+        if self.verbose:
             pbar0 = tqdm(generator, desc="Points classification", unit=" voxel", leave=False)
         else:
             pbar0 = generator
@@ -256,7 +256,7 @@ class SegmentClass:
             voxel_idx = np.sort(voxel_idx)
 
             checksum += voxel_idx.shape[0]
-            if self.pbar_bool:
+            if self.verbose:
                 pbar0.update(1)
                 pbar0.set_postfix({"Number of processed points": checksum})
 
@@ -269,8 +269,8 @@ class SegmentClass:
                 assert voxel_probs.shape[0] == voxel.shape[0]
 
             else:
-                voxel_probs = np.zeros((voxel.shape[0], self._model_config['num_classes']), dtype = np.float32)
-                voxel_probs[:, 0] = 1 # highest prob for class 0
+                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes'], 0.1), dtype = np.float32)
+                voxel_probs[:, 0] = 0.9 # highest prob for class 0
 
 
             voxel = voxel0[voxel_idx] # remove redundant points and overwrite centered voxel
@@ -339,7 +339,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/home/michal-siniarski/Dokumenty/Z32/LAS/TREE_SEGM/automatically_segmented_data/O1W.laz"
+    path2laz = "/mnt/fcadda7e-cec7-4f07-b005-1d1719df93e7/BRIK/BRIK_DATA_PROCESS/testing/09-05_small.laz"
 
     import laspy
     import pathlib as pth
@@ -351,14 +351,15 @@ def test_segm():
 
     segmenter = SegmentClass(model_name="RandLANetV3_2",
                              device = torch.device('cuda'),
-                             pbar_bool = True)
+                             verbose = True)
     labels = segmenter.segment_pcd(points=points,
                           intensity=intensity)
+    
+    las.classification = labels
+    las.write(path2laz.stem + "_mod.laz")
 
 
 
 
 if __name__ == '__main__':
     test_segm()
-
-

@@ -209,7 +209,7 @@ class LocalFeatureAggregation(nn.Module):
 
 
 class RandLANet(nn.Module):
-    def __init__(self, model_config: dict, n_features: int):
+    def __init__(self, model_config: dict, num_classes: int):
         super(RandLANet, self).__init__()
 
         # Extract parameters from config
@@ -261,7 +261,7 @@ class RandLANet(nn.Module):
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=False)
 
-        # fc_end: configurable layers and dropout - outputs n_features instead of n_classes
+        # fc_end: configurable layers and dropout
         fc_end_layers = fc_end_config.get('layers', [64, 32])
         fc_end_dropout = fc_end_config.get('dropout', 0.5)
         
@@ -278,13 +278,12 @@ class RandLANet(nn.Module):
         if fc_end_dropout > 0:
             fc_end_modules.append(nn.Dropout(fc_end_dropout))
         
-        # Output n_features instead of num_classes
-        fc_end_modules.append(SharedMLP(current_d, n_features))
+        fc_end_modules.append(SharedMLP(current_d, num_classes))
         
         self.fc_end = nn.Sequential(*fc_end_modules)
 
     @classmethod
-    def from_config_file(cls, config_path: Union[str, Path], n_features: int):
+    def from_config_file(cls, config_path: Union[str, Path], num_classes: int):
         """
         Load model from a JSON config file
         
@@ -292,8 +291,8 @@ class RandLANet(nn.Module):
         ----------
         config_path : str or Path
             Path to JSON config file
-        n_features : int
-            Number of output features per point
+        num_classes : int
+            Number of output classes
             
         Returns
         -------
@@ -305,7 +304,7 @@ class RandLANet(nn.Module):
         with open(config_path, 'r') as f:
             config = json.load(f)
         
-        return cls(model_config=config, n_features=n_features)
+        return cls(model_config=config, num_classes=num_classes)
 
     def forward(self, input):
         d = self.decimation
@@ -394,11 +393,11 @@ class RandLANet(nn.Module):
         
         self.KNN.clear()
 
-        features = self.fc_end(x)
+        scores = self.fc_end(x)
         if self.training:
-            features = features[:, : ,torch.argsort(permutation)]
+            scores = scores[:, : ,torch.argsort(permutation)]
 
-        return features.squeeze(-1)
+        return scores.squeeze(-1)
     
 
 
@@ -419,13 +418,13 @@ def test_model():
             {'d_in': 2048, 'd_out': 512},
             {'d_in': 1024, 'd_out': 256},
             {'d_in': 512, 'd_out': 128},
-            {'d_in': 192, 'd_out': 32}
+            {'d_in': 192, 'd_out': 8}
         ],
         'fc_start': {
             'd_out': 8
         },
         'fc_end': {
-            'layers': [32, 64],
+            'layers': [64, 32],
             'dropout': 0.5
         },
         'max_voxel_dim': 20.
@@ -433,19 +432,19 @@ def test_model():
     
     batch_size = 10
     num_points = 8192
-    n_features = 32  # Changed from num_classes to n_features
+    num_classes = 10
 
     # random test input
     dummy_input = torch.randn(batch_size, num_points, model_config['d_in']).to(torch.device('cuda'))
 
-    model = RandLANet(model_config=model_config, n_features=n_features).to(torch.device('cuda'))
+    model = RandLANet(model_config=model_config, num_classes=num_classes).to(torch.device('cuda'))
     # summary(model, input_size=dummy_input.shape)
 
     # test output
     output = model(dummy_input)
 
-    # shape check - now outputs features instead of class scores
-    expected_output_shape = (batch_size, n_features, num_points)
+    # shape check
+    expected_output_shape = (batch_size, num_classes, num_points)
     assert output.shape == expected_output_shape, f"Expected shape: {expected_output_shape}, received: {output.shape}"
 
     print(f"Success! Output shape: {output.shape}, expected: {expected_output_shape}")

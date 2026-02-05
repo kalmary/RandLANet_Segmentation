@@ -20,6 +20,7 @@ sys.path.append(str(main_dir))
 
 from utils.pcd_manipulation import voxelGridFragmentation
 from utils import convert_str_values, load_json, save2json
+import open3d as o3d
 
 def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dict) -> None:
     if not work_dir.exists():
@@ -82,19 +83,13 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
 
                 classification = np.asarray(las.classification, dtype=np.int32)
-
-                points = points[classification>cut_label]
-
                 intensity = np.asarray(las.intensity, dtype=np.float32)
-                intensity = scaler.fit_transform(intensity.reshape(-1, 1))
-                # intensity = intensity / (2 ** 16 - 1)
-                intensity = intensity.flatten()
 
-                intensity = intensity[classification>cut_label]
-
-                classification = classification[classification >cut_label]
-                classification -= 1 # TODO remove cut cabel part for official repo use
-
+                
+                points = points[classification > cut_label]
+                intensity = intensity[classification > cut_label]
+                classification = classification[classification > cut_label]
+                classification -= 1
 
                 for i, (sampled_idx, noise) in enumerate(voxelGridFragmentation(points,
                                                                                 voxel_size=np.array([20., 20.]), #TODO check if it works, update in other places
