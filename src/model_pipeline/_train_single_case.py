@@ -27,7 +27,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
     device_cpu = torch.device('cpu')
 
     device_loader = device_gpu
-    device_loss = device_gpu
+    device_loss = device_cpu
 
     train_dataset = Dataset(base_dir=training_dict['data_path_train'],
                                       num_points=training_dict['num_points'],

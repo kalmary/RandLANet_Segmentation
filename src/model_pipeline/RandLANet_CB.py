@@ -82,7 +82,8 @@ class LocalSpatialEncoding(nn.Module):
         super(LocalSpatialEncoding, self).__init__()
 
         self.num_neighbors = num_neighbors
-        self.mlp = SharedMLP(10, d, bn=True, activation_fn=nn.ReLU())
+        # Input: 9 features (relative_pos=3, height=1, distance=1, vertical_angle=1, azimuth_angle=1, planarity=1, verticality=1)
+        self.mlp = SharedMLP(9, d, bn=True, activation_fn=nn.ReLU())
 
     def forward(self, coords, features, knn_output):
         idx, dist = knn_output
@@ -95,7 +96,6 @@ class LocalSpatialEncoding(nn.Module):
         coords_t = coords.transpose(-2, -1)  # (B, 3, N) - done once
 
         # Efficient neighbor gathering using advanced indexing
-        # IMPORTANT: All index tensors must be long type
         batch_indices = torch.arange(B, device=coords.device, dtype=torch.long).view(B, 1, 1, 1)
         coord_indices = torch.arange(3, device=coords.device, dtype=torch.long).view(1, 3, 1, 1)
         neighbors = coords_t[batch_indices, coord_indices, idx.unsqueeze(1)]  # (B, 3, N, K)
@@ -103,16 +103,52 @@ class LocalSpatialEncoding(nn.Module):
         # Create center coordinates efficiently
         center_coords = coords_t.unsqueeze(-1)  # (B, 3, N, 1)
 
-        # Compute spatial encodings directly without intermediate expansions
-        relative_pos = center_coords - neighbors  # Broadcasting handles expansion
+        # Compute relative position (p_i - p_j)
+        relative_pos = center_coords - neighbors  # (B, 3, N, K)
 
-        # Concatenate all spatial features at once
+        # Extract height (z-coordinate) of center point
+        height = center_coords[:, 2:3, :, :]  # (B, 1, N, 1)
+        height_expanded = height.expand(-1, -1, -1, K)  # (B, 1, N, K)
+
+        # Euclidean distance (already computed by KNN)
+        distance = dist.unsqueeze(1)  # (B, 1, N, K)
+
+        # Vertical angle: angle between relative vector and z-axis
+        # cos(theta) = z_component / distance
+        vertical_component = relative_pos[:, 2:3, :, :]  # (B, 1, N, K)
+        vertical_angle = vertical_component / (distance + 1e-8)  # cos(theta), (B, 1, N, K)
+
+        # Azimuth angle: using atan2 for xy-plane angle
+        # Convert to cos/sin to avoid discontinuity
+        xy_dist = torch.sqrt(relative_pos[:, 0:1, :, :]**2 + relative_pos[:, 1:2, :, :]**2 + 1e-8)
+        azimuth_cos = relative_pos[:, 0:1, :, :] / (xy_dist + 1e-8)  # (B, 1, N, K)
+        # Note: using only cos(azimuth) to keep feature count manageable
+        
+        # Planarity indicator: std of z-coordinates in local neighborhood
+        # This helps identify flat vs. non-flat regions
+        neighbor_z = neighbors[:, 2:3, :, :]  # (B, 1, N, K)
+        z_std = torch.std(neighbor_z, dim=-1, keepdim=True)  # (B, 1, N, 1)
+        planarity = z_std.expand(-1, -1, -1, K)  # (B, 1, N, K)
+
+        # Verticality: ratio of vertical extent to horizontal extent in neighborhood
+        z_range = neighbor_z.max(dim=-1, keepdim=True)[0] - neighbor_z.min(dim=-1, keepdim=True)[0]
+        xy_range = torch.sqrt(
+            (neighbors[:, 0:1, :, :].max(dim=-1, keepdim=True)[0] - neighbors[:, 0:1, :, :].min(dim=-1, keepdim=True)[0])**2 +
+            (neighbors[:, 1:2, :, :].max(dim=-1, keepdim=True)[0] - neighbors[:, 1:2, :, :].min(dim=-1, keepdim=True)[0])**2 + 1e-8
+        )
+        verticality = z_range / (xy_range + 1e-8)  # (B, 1, N, 1)
+        verticality = verticality.expand(-1, -1, -1, K)  # (B, 1, N, K)
+
+        # Concatenate all geometric features
         concat = torch.cat([
-            center_coords.expand(-1,-1,-1,K),   # p_i
-            relative_pos,                       # p_j - p_i
-            neighbors,                           # p_j
-            dist.unsqueeze(1)                    # distance
-        ], dim=1)
+            relative_pos,          # 3 features: relative position (dx, dy, dz)
+            height_expanded,       # 1 feature: absolute height of center point
+            distance,              # 1 feature: euclidean distance
+            vertical_angle,        # 1 feature: angle from horizontal plane
+            azimuth_cos,          # 1 feature: azimuth orientation
+            planarity,            # 1 feature: local flatness
+            verticality           # 1 feature: vertical vs horizontal extent
+        ], dim=1)  # Total: 9 features
 
         # Process through MLP
         encoded = self.mlp(concat)
