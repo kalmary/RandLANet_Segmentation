@@ -60,15 +60,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         class_weights_t = calculate_class_weights(loader = trainLoader, 
                                                 num_classes=training_dict['num_classes'], 
-                                                method='effective',
-                                                total=total_t, 
+                                                power=0.3,
                                                 device=device_loss,
                                                 verbose=False)
         
         class_weights_v = calculate_class_weights(loader = valLoader, 
-                                                num_classes=training_dict['num_classes'], 
-                                                method='effective',
-                                                total=total_v, 
+                                                num_classes=training_dict['num_classes'],
+                                                power=0.3, 
                                                 device=device_loss,
                                                 verbose=False)
         
