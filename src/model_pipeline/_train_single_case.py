@@ -187,6 +187,8 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 for batch_x, batch_y in progressbar_t:
                     
                     batch_x = batch_x.to(training_dict['device'])
+
+                    optimizer.zero_grad()
                     outputs = model(batch_x)
 
                     outputs = outputs.to(device_loss)
@@ -194,7 +196,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                     loss_t = criterion_t(outputs, batch_y)
 
-                    optimizer.zero_grad()
                     loss_t.backward()
                     optimizer.step()
 
