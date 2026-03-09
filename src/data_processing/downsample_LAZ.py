@@ -101,7 +101,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                         continue
 
                     classification_chunk_0 = classification[sampled_idx_0]
-                    if np.unique(classification_chunk_0).flatten().shape[0] < 4:
+                    if np.unique(classification_chunk_0).flatten().shape[0] < 3:
                         continue
 
                     points_chunk_0 = points[sampled_idx_0]
