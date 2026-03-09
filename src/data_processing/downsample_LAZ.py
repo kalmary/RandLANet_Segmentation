@@ -102,7 +102,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                         continue
 
                     points_chunk = points[sampled_idx]
-                    points_chunk -= np.mean(points, axis = 0)
+                    points_chunk -= np.mean(points_chunk, axis = 0)
 
                     intensity_chunk = intensity[sampled_idx]
                     classification_chunk = classification[sampled_idx]
