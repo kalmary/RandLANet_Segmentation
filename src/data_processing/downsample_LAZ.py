@@ -77,8 +77,11 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                     las = laspy.read(path)
                 except Exception as e:
                     print(e)
+                    continue
 
                 points = np.vstack((las.x, las.y, las.z)).transpose()
+                points = points.astype(np.float64)
+
                 points = points - np.mean(points, axis =0)
 
 
@@ -104,7 +107,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                     intensity_chunk = intensity[sampled_idx]
                     classification_chunk = classification[sampled_idx]
 
-                    if np.unique(classification_chunk).flatten().shape[0] < 3: # TODO a way to avoid imbalance of dataset with huge number of ground points.
+                    if np.unique(classification_chunk).flatten().shape[0] < 4: # TODO a way to avoid imbalance of dataset with huge number of ground points.
                         continue
 
                     chunk = np.concatenate([points_chunk,
