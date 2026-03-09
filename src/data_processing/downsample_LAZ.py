@@ -69,12 +69,10 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                 n = 0
                 chunk_num = 0
 
-                with laspy.open(path) as f:
-                    total_points = f.header.point_count
-
 
                 try:
                     las = laspy.read(path)
+                    total_points = len(las.points)
                 except Exception as e:
                     print(e)
                     continue
@@ -94,40 +92,57 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                 classification = classification[classification > cut_label]
                 classification -= 1
 
-                for i, (sampled_idx, noise) in enumerate(voxelGridFragmentation(points,
-                                                                                voxel_size=np.array([20., 20.]), #TODO check if it works, update in other places
-                                                                                overlap_ratio=0.25,
-                                                                                num_points=2*8192,
-                                                                                shuffle=True)):
-                    if noise:
+                for i_0, (sampled_idx_0, noise_0) in enumerate(voxelGridFragmentation(points,
+                                                                                      voxel_size=np.array([200., 200.]),
+                                                                                      overlap_ratio=0.,
+                                                                                      num_points=0,
+                                                                                      shuffle=True)):
+                    if noise_0:
                         continue
 
-                    points_chunk = points[sampled_idx]
-                    points_chunk -= np.mean(points_chunk, axis = 0)
-
-                    intensity_chunk = intensity[sampled_idx]
-                    classification_chunk = classification[sampled_idx]
-
-                    if np.unique(classification_chunk).flatten().shape[0] < 4: # TODO a way to avoid imbalance of dataset with huge number of ground points.
+                    classification_chunk_0 = classification[sampled_idx_0]
+                    if np.unique(classification_chunk_0).flatten().shape[0] < 4:
                         continue
 
-                    chunk = np.concatenate([points_chunk,
-                                            intensity_chunk.reshape(-1, 1),
-                                            classification_chunk.reshape(-1, 1)],
-                                            axis = 1)
-                    
-                    n_org = points_chunk.shape[0]
-                    chunk_num += 1
+                    points_chunk_0 = points[sampled_idx_0]
+                    intensity_chunk_0 = intensity[sampled_idx_0]
 
-                    generator.set_postfix({
-                        'Points': f"{n}/ {total_points}, ({n_org} -> {points_chunk.shape[0]})",
-                        'Partitioning': f"{i}"
-                    })
 
-                    file_name = goal.joinpath(path.stem+f'_{chunk_num}_{i}.npy')
-                    np.save(file_name, chunk)
 
-                    n+=n_org
+                    for i, (sampled_idx, noise) in enumerate(voxelGridFragmentation(points_chunk_0,
+                                                                                    voxel_size=np.array([20., 20.]), #TODO check if it works, update in other places
+                                                                                    overlap_ratio=0.25,
+                                                                                    num_points=2*8192,
+                                                                                    shuffle=True)):
+                        if noise:
+                            continue
+
+                        points_chunk = points_chunk_0[sampled_idx]
+                        points_chunk -= np.mean(points_chunk, axis = 0)
+
+                        intensity_chunk = intensity_chunk_0[sampled_idx]
+                        classification_chunk = classification_chunk_0[sampled_idx]
+
+                        if np.unique(classification_chunk).flatten().shape[0] < 4: # TODO a way to avoid imbalance of dataset with huge number of ground points.
+                            continue
+
+                        chunk = np.concatenate([points_chunk,
+                                                intensity_chunk.reshape(-1, 1),
+                                                classification_chunk.reshape(-1, 1)],
+                                                axis = 1)
+                        
+                        n_org = points_chunk.shape[0]
+                        chunk_num += 1
+
+                        generator.set_postfix({
+                            'Points': f"{n}/ {total_points}, ({n_org} -> {points_chunk.shape[0]})",
+                            'Partitioning': f"{i}"
+                        })
+
+                        file_name = goal.joinpath(path.stem+f'_{chunk_num}_{i}.npy')
+                        np.save(file_name, chunk)
+
+                        n+=n_org
 
     decimate_folder(progress_train, train_pth)
     decimate_folder(progress_test, test_pth)
