@@ -68,7 +68,10 @@ def check_models(model_configs_paths: list[pth.Path],
         except Exception as e:
             if verbose:
                 print(f"Error compiling model {model_config_path.name}:\n{e}")
-            model_configs_paths.pop(index)
+            if len(model_configs_paths) > 0:
+                model_configs_paths.pop(index)
+            else:
+                return []
         else:
             model_configs.append(model_config)  
     
@@ -101,74 +104,6 @@ def get_factor_list(param_value_list: list[Union[float]]) -> list[Union[float]]:
     factor_list.sort()
     return factor_list
 
-    
-
-def generate_experiment_configs(training_config: dict, 
-                                model_configs_list: Sequence[dict],
-                                device_name: str = 'cpu') -> list[dict]:
-    logger = logging.getLogger(__name__)
-    logger.info(f'START: generate_experiment_config.')
-    
-    device = torch.device('cuda') if (('cuda' in device_name.lower() or 'gpu' in device_name.lower()) and torch.cuda.is_available()) else torch.device('cpu')
-    logger.info(f'Using device: {device}')
-
-    dynamic_params = {}
-    static_params = {}
-
-    # Separate dynamic and model, base_path=base_path, existing_ok=Truestatic parameters
-
-    for key, value in training_config.items():
-        
-        if "comment" in key.lower():
-            continue
-        
-        elif isinstance(value, list) and len(value) > 1 and not 'samples_len' in key.lower():
-            if "learning_rate" in key.lower() or "weight_decay" in key.lower():
-                dynamic_params[key] = get_factor_list(training_config[key])
-            else:
-                dynamic_params[key] = get_step_list(value)
-
-        elif 'samples_len' in key.lower():
-            samples_len = get_step_list(value)
-            static_params[key] = samples_len
-        else:
-            static_params[key] = value
-
-    static_params['device'] = device
-    
-    logger.info(f'Generated {len(dynamic_params)} dynamic parameters.')
-    logger.info(f'Generated {len(static_params)} static parameters.')
-
-    # Generate all combinations of dynamic parameters
-    keys = dynamic_params.keys()
-    values_lists = dynamic_params.values()
-    combinations = list(itertools.product(*values_lists))
-
-    
-    # Create experiment configurations
-    exp_configs = []
-    for combo in combinations:
-        combo_dict = dict(zip(keys, combo))
-        combo_dict.update(static_params)
-
-        for model_config in model_configs_list:
-            
-            # get model config
-            dynamic_config = dict(zip(keys, combo))
-            
-            exp_config = static_params.copy()
-            exp_config.update(dynamic_config)
-            exp_config['model_config'] = model_config
-            exp_config['model_config']['num_classes'] = exp_config['num_classes']
-            
-            exp_configs.append(exp_config)
-        
-    logger.info(f'Generated {len(exp_configs)} experiment configurations.')
-    logger.info(f'STOP: generate_experiment_config')
-
-
-    return exp_configs
-
 
 
 def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0) -> list[dict]:
@@ -185,12 +120,11 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
     logger.info(f'START: case_based_training.')
 
     if isinstance(mode, int):
-        if mode not in [0, 1, 2, 3]:
+        if mode not in [0, 1, 2]:
             raise ValueError(f"Invalid mode: {mode}. Must be:\n" \
                              "0 - test" \
                              "1 - single_training," \
-                             "2 - multiple trainings, grid_based," \
-                             "3 - multiple trainings, with optuna.")
+                             "2 - multiple trainings, with optuna.")
 
     base_dir = pth.Path(base_dir)
     config_files_dir = base_dir.joinpath('training_configs')
@@ -202,7 +136,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
 
     if mode == 0 or mode == 1:
         training_config = load_json(config_files_dir.joinpath('config_train_single.json'))
-    elif mode == 2 or mode == 3:
+    elif mode == 2:
         training_config = load_json(config_files_dir.joinpath('config_train.json'))
     
     logger.info(f'Loaded training config for mode: {mode}.')
@@ -213,12 +147,13 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
         model_configs_paths_list = [p for p in model_configs_paths_list if "single" not in p.stem]
     
     training_config = convert_str_values(training_config)
-    model_configs_list, _ = check_models(model_configs_paths_list, max_input_size=(8, 2*8192, 4), max_memory_GB=32)
+    model_configs_list, _ = check_models(model_configs_paths_list, max_memory_GB=32)
     
     assert model_configs_list != 0, "No models compiled. Check model_configs - most likely too big models are defined"
 
-    if mode == 3:
-        device = torch.device('cuda') if (('cuda' in device_name.lower() or 'gpu' in device_name.lower()) and torch.cuda.is_available()) else torch.device('cpu')
+    device = torch.device('cuda') if (('cuda' in device_name.lower() or 'gpu' in device_name.lower()) and torch.cuda.is_available()) else torch.device('cpu')
+    if mode == 2:
+
         training_config['device'] = device
         
         logger.info(f'Loaded device: {device}')
@@ -228,11 +163,15 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
 
         return [training_config, model_configs_list]
     else:
-        exp_configs = generate_experiment_configs(training_config, 
-                                            model_configs_list, 
-                                            device_name = device_name)
+        
         
         logger.info(f'STOP: load_config. All files loaded.')
+
+        training_config['model'] = None
+        training_config['model_config'] = model_configs_list[0]
+        training_config['device'] = device
+
+        exp_configs = [training_config]
 
         return exp_configs
 
@@ -631,15 +570,14 @@ def argparser():
         '--mode',
         type=int,
         default=0,
-        choices=[0, 1, 2, 3, 4], # choice limit
+        choices=[0, 1, 2, 3], # choice limit
         help=(
             "Device for tensor based computation.\n"
             'Pick:\n'
             '0: test\n'
             '1: single training\n'
-            '2: multiple trainings, grid_based\n'
-            '3: multiple trainings, with optuna\n'
-            '4: only check models'
+            '2: multiple trainings, with optuna\n'
+            '3: only check models'
         )
     )
 
@@ -679,19 +617,19 @@ def main():
     model_name = args.model_name
 
     base_path = pth.Path(__file__).parent
-    if args.mode != 4:
+    if args.mode != 3:
         exp_configs  = load_config(base_path, device, mode = args.mode)
 
     if args.mode == 0:
         test_case(exp_config=exp_configs[0])
-    elif args.mode == 1 or args.mode==2:
+    elif args.mode == 1:
         case_based_training(exp_configs=exp_configs,
                             model_name=model_name)
-    elif args.mode == 3:
+    elif args.mode == 2:
         optuna_based_training(exp_config=exp_configs,
                               model_name=model_name,
                               n_trials=80)
-    elif args.mode == 4:
+    elif args.mode == 3:
         model_configs_dir = base_path.joinpath('model_configs')
         model_configs_paths_list = list(model_configs_dir.rglob('*.json'))
 
