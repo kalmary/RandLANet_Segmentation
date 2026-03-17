@@ -2,3 +2,6 @@
 [submodule "src/utils/nn_utils"]
 	path = src/utils/nn_utils
 	url = https://github.com/kalmary/nn_utils.git
+[submodule "src/utils/model_serializer"]
+	path = src/utils/model_serializer
+	url = https://github.com/kalmary/Model-Serializer.git
