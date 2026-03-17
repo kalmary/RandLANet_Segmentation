@@ -1,214 +1,258 @@
-import pathlib as pth
 import numpy as np
-import random
-import h5py
-from typing import Optional, Union, OrderedDict
-
+import pickle
 import torch
-from torch.utils.data import IterableDataset, get_worker_info
-
-import fpsample
-import random
-
-import sys
-import os
-
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
+from pathlib import Path
+from torch.utils.data import IterableDataset, DataLoader
 
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
+class CustomDataset(IterableDataset):
+    """
+    DALES-style iterable dataset over pre-cut .npy tiles.
+    Each .npy tile has a paired .pkl KDTree built during preprocessing.
 
-class Dataset(IterableDataset):
+    File format: (N, 5) — xyz(3) + intensity(1) + label(1)
 
-    def __init__(self, base_dir: Union[str, pth.Path],
-                 mode: int = 0,
-                 num_points: int = 4096,
-                 batch_size: int = 1,
-                 shuffle: bool = True,
-                 weights: Optional[torch.Tensor] = None,
-                 oversample_power: float = 1.5,
-                 device: Optional[torch.device] = torch.device('cpu')):
+    Output per batch:
+        xyz_feats : (B, num_points, 4)  — xyz + intensity
+        labels    : (B, num_points, 1)  — class index
 
-        super(Dataset).__init__()
+    shuffle=True:
+        - file order shuffled per epoch
+        - buffer shuffled before draining into batches
+        - records within each batch shuffled
+    """
 
-        self.path = pth.Path(base_dir)
-        self.device = device
-        self.mode = mode
+    def __init__(self, data_dir,
+                 num_points:      int   = 8192,
+                 batch_size:      int   = 8,
+                 buffer_size:     int   = 64,
+                 shuffle:         bool  = True,
+                 pos_weights:     np.ndarray = None,
+                 coverage_thresh: float = 0.5,
+                 epoch:           int   = 0):
 
-        self.num_points = num_points
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.weights = weights
+        self.files           = sorted(Path(data_dir).glob("*.npy"))
+        self.num_points      = num_points
+        self.batch_size      = batch_size
+        self.buffer_size     = buffer_size
+        self.shuffle         = shuffle
+        self.pos_weights     = pos_weights
+        self.coverage_thresh = coverage_thresh
+        self._epoch          = epoch
 
-        # Process weights for sampling if provided
-        if weights is not None and oversample_power != 1.0:
-            # Apply power to make oversampling more/less aggressive
-            sampling_weights = torch.pow(weights, oversample_power)
-            # Re-normalize
-            sampling_weights = sampling_weights / sampling_weights.sum()
-            self.sampling_weights = sampling_weights
-        else:
-            self.sampling_weights = weights
+        assert len(self.files) > 0, f"No .npy files in {data_dir}"
+        assert buffer_size >= batch_size, \
+            f"buffer_size ({buffer_size}) must be >= batch_size ({batch_size})"
 
-    def _key_streamer(self):
+        missing = [f for f in self.files if not f.with_suffix(".pkl").exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"Missing KDTree .pkl for {len(missing)} tiles: {missing[:3]} ..."
+            )
+
+    def set_epoch(self, epoch: int):
+        self._epoch = epoch
+
+    # ------------------------------------------------------------------
+    # possibility map
+    # ------------------------------------------------------------------
+    def _build_possibility(self, labels: np.ndarray) -> np.ndarray:
+        n = len(labels)
+        if self.pos_weights is None:
+            return np.random.uniform(0, 1, n).astype(np.float32)
+
+        w       = self.pos_weights / (self.pos_weights.max() + 1e-6)
+        point_w = w[labels]
+        poss    = (1.0 - point_w).astype(np.float32)
+        poss   += np.random.uniform(0, 0.05, n).astype(np.float32)
+        return poss
+
+    @staticmethod
+    def _update_possibility(poss, neighbor_idx, xyz, center):
+        dists              = np.linalg.norm(xyz[neighbor_idx] - center, axis=1)
+        max_d              = dists.max() + 1e-6
+        poss[neighbor_idx] += (1.0 - dists / max_d) ** 2
+
+    # ------------------------------------------------------------------
+    # raw sample stream from one file
+    # ------------------------------------------------------------------
+    def _iter_file(self, npy_path: Path):
+        """Yields individual (xyz_feats, label) numpy samples."""
+        data   = np.load(npy_path)
+        xyz    = data[:, :3].astype(np.float32)
+        feats  = data[:, 3:4].astype(np.float32)
+        labels = data[:, 4].astype(np.int32)
+        del data
+
+        with open(npy_path.with_suffix(".pkl"), "rb") as f:
+            kdtree = pickle.load(f)
+
+        poss = self._build_possibility(labels)
+
+        while poss.min() < self.coverage_thresh:
+            center_idx      = int(np.argmin(poss))
+            center          = xyz[center_idx]
+
+            _, neighbor_idx = kdtree.query(center[None], k=self.num_points)
+            neighbor_idx    = neighbor_idx[0]
+
+            self._update_possibility(poss, neighbor_idx, xyz, center)
+
+            xyz_local  = xyz[neighbor_idx] - center          # (N, 3)
+            feat_local = feats[neighbor_idx]                  # (N, 1)
+            lbl_local  = labels[neighbor_idx].astype(np.int64)  # (N,)
+
+            # concat xyz + intensity → (N, 4)
+            xyz_feats = np.concatenate([xyz_local, feat_local], axis=1)
+
+            yield xyz_feats, lbl_local
+
+        del xyz, feats, labels, kdtree, poss
+
+    # ------------------------------------------------------------------
+    # buffer → batches
+    # ------------------------------------------------------------------
+    def _iter_batched(self, file_order, rng):
         """
-        Generator over all keys. Each worker processes all keys,
-        but only its assigned chunks within each key.
+        Accumulates samples into buffer, optionally shuffles,
+        drains into batches with optional in-batch point shuffle.
         """
-        with h5py.File(self.path, 'r') as h_file:
-            keys = list(h_file.keys())
-            
+        buffer = []   # list of (xyz_feats (N,4), labels (N,)) numpy pairs
+
+        def drain(flush=False):
             if self.shuffle:
-                random.shuffle(keys)
+                rng.shuffle(buffer)
+            while len(buffer) >= self.batch_size:
+                batch          = buffer[:self.batch_size]
+                del buffer[:self.batch_size]
 
-            worker_info = get_worker_info()
-            if worker_info is None:
-                iter_keys = keys
-            else:
-                total_workers = worker_info.num_workers
-                worker_id = worker_info.id
-                iter_keys = keys[worker_id::total_workers]
+                xyz_feats_b = np.stack([s[0] for s in batch])  # (B, N, 4)
+                labels_b    = np.stack([s[1] for s in batch])  # (B, N)
 
-            for key in iter_keys:
-                data = h_file[key][:]
                 if self.shuffle:
-                    indices = list(range(data.shape[0]))
-                    random.shuffle(indices)
-                    data = data[indices]
+                    # shuffle points within each sample independently
+                    for b in range(self.batch_size):
+                        perm             = rng.permutation(self.num_points)
+                        xyz_feats_b[b]   = xyz_feats_b[b][perm]
+                        labels_b[b]      = labels_b[b][perm]
 
-                yield from data
+                yield (
+                    torch.from_numpy(xyz_feats_b),               # (B, N, 4)
+                    torch.from_numpy(labels_b[:, :, None]),       # (B, N, 1)
+                )
 
+            if flush and buffer:
+                batch       = buffer[:]
+                del buffer[:]
+                xyz_feats_b = np.stack([s[0] for s in batch])
+                labels_b    = np.stack([s[1] for s in batch])
+                yield (
+                    torch.from_numpy(xyz_feats_b),
+                    torch.from_numpy(labels_b[:, :, None]),
+                )
 
+        for file_idx in file_order:
+            for sample in self._iter_file(self.files[file_idx]):
+                buffer.append(sample)
+                if len(buffer) >= self.buffer_size:
+                    yield from drain()
 
-    def _balance_point_cloud(self, cloud_tensor, features_tensor, labels_tensor):
-            """
-            Resample points within a point cloud to balance classes using provided weights.
-            
-            Returns:
-                Resampled cloud_tensor, features_tensor, labels_tensor (all same length)
-            """
-            if self.sampling_weights is None:
-                return cloud_tensor, features_tensor, labels_tensor
-            
+        yield from drain(flush=True)
 
-            self.weights.to(labels_tensor.device)
-            # Get per-point sampling weights based on their class
-            point_weights = self.sampling_weights[labels_tensor.long()]
-            
-            # Normalize to valid probabilities
-            point_weights = point_weights / (point_weights.sum() + 1e-10)
-            
-            # Sample with replacement according to weights
-            try:
-                num_samples = min(self.num_points, len(labels_tensor))
-                indices = torch.multinomial(
-                    point_weights, 
-                    num_samples, 
-                    replacement=True
-                ).to(labels_tensor.device)
-                
-                # Apply same indices to all tensors
-                cloud_tensor = cloud_tensor[indices]
-                features_tensor = features_tensor[indices]
-                labels_tensor = labels_tensor[indices]
-                
-            except RuntimeError as e:
-                # Fallback if multinomial fails (rare edge case)
-                print(f"Warning: Point cloud resampling failed: {e}")
-                pass
-            
-            return cloud_tensor, features_tensor, labels_tensor
-
-    def _process_cloud(self):
-
-
-        for cloud in self._key_streamer():
-            cloud_tensor = cloud[:, :3]
-
-            cloud_tensor = torch.from_numpy(cloud_tensor[:, :3]).float()
-            cloud_tensor -= cloud_tensor.mean(dim=0)
-
-
-            labels_tensor = torch.from_numpy(cloud[:, -1]).long()
-
-
-            features_tensor = torch.from_numpy(cloud[:, 3]).reshape(-1, 1).float()
-
-            if cloud_tensor.shape[0] > self.num_points:
-                idx = fpsample.bucket_fps_kdline_sampling(cloud_tensor.cpu().numpy(), self.num_points, h=7)
-                cloud_tensor = cloud_tensor[idx]
-                features_tensor = features_tensor[idx]
-                labels_tensor = labels_tensor[idx]
-
-            if self.weights is not None and self.shuffle:
-                self.weights = self.weights[labels_tensor] # 
-                cloud_tensor, features_tensor, labels_tensor = self._balance_point_cloud(cloud_tensor, features_tensor, labels_tensor)
-
-            if self.shuffle:
-                cloud_tensor = cloud_tensor.to(self.device)
-                cloud_tensor = add_gaussian_noise(cloud_tensor, std=0.05)
-                cloud_tensor = rotate_points(cloud_tensor, device=self.device)
-                cloud_tensor = tilt_points(cloud_tensor,
-                                           max_x_tilt_degrees=5,
-                                           max_y_tilt_degrees=5)
-                cloud_tensor = transform_points(cloud_tensor,
-                                                min_scale=0.95,
-                                                max_scale=1.05,
-                                                device=self.device)
-                cloud_tensor = cloud_tensor.cpu()
-
-            cloud_tensor -= cloud_tensor.mean(dim=0)
-
-
-
-           
-            if features_tensor is not None:
-                cloud_tensor = torch.cat([cloud_tensor, features_tensor], dim=1)
-
-            yield cloud_tensor, labels_tensor
-
-
+    # ------------------------------------------------------------------
+    # __iter__
+    # ------------------------------------------------------------------
     def __iter__(self):
-        stream = self._process_cloud()
-        batch_data = []
-        batch_labels = []
+        rng   = np.random.default_rng(self._epoch)
+        order = list(range(len(self.files)))
 
-        for cloud_tensor, labels_tensor in stream:
+        if self.shuffle:
+            order = rng.permutation(order).tolist()
 
-            batch_data.append(cloud_tensor)
-            batch_labels.append(labels_tensor)
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is not None:
+            order = order[worker_info.worker_id :: worker_info.num_workers]
 
-            if len(batch_data) == self.batch_size:
+        yield from self._iter_batched(order, rng)
 
-                batch_data_tensor = torch.stack(batch_data)
-                batch_labels_tensor = torch.stack(batch_labels)
 
-                if self.shuffle:
-                    idx = torch.randperm(batch_labels_tensor.shape[0])
+# ------------------------------------------------------------------
+# helpers
+# ------------------------------------------------------------------
+def compute_pos_weights(data_dir, num_classes: int,
+                        power: float = 0.25) -> np.ndarray:
+    """
+    Inverse frequency weights with power dampening.
+    power=1.0 → raw inverse freq
+    power=0.5 → sqrt dampening
+    power=0.25 → fourth root (default, mild compression)
+    power=0.0 → uniform
+    """
+    counts = np.zeros(num_classes, dtype=np.int64)
+    for path in sorted(Path(data_dir).glob("*.npy")):
+        labels  = np.load(path)[:, 4].astype(np.int32)
+        counts += np.bincount(labels, minlength=num_classes)
 
-                    batch_data_tensor = batch_data_tensor[idx]
-                    batch_labels_tensor = batch_labels_tensor[idx]
+    weights              = (1.0 / (counts + 1e-6)) ** power
+    weights[counts == 0] = 0.0
+    weights              = (weights / weights.max()).astype(np.float32)
+    return weights
 
-                yield batch_data_tensor, batch_labels_tensor
 
-                batch_data = []
-                batch_labels = []
+def make_loader(data_dir,
+                num_points:      int   = 8192,
+                batch_size:      int   = 8,
+                buffer_size:     int   = 64,
+                num_workers:     int   = 4,
+                shuffle:         bool  = True,
+                pos_weights:     np.ndarray = None,
+                coverage_thresh: float = 0.5,
+                epoch:           int   = 0) -> tuple[DataLoader, CustomDataset]:
 
-        # Yield any remaining samples
-        if len(batch_data) > 0:
+    ds = CustomDataset(
+        data_dir        = data_dir,
+        num_points      = num_points,
+        batch_size      = batch_size,
+        buffer_size     = buffer_size,
+        shuffle         = shuffle,
+        pos_weights     = pos_weights,
+        coverage_thresh = coverage_thresh,
+        epoch           = epoch,
+    )
+    loader = DataLoader(
+        ds,
+        num_workers        = num_workers,
+        pin_memory         = True,
+        persistent_workers = False
+    )
+    return loader, ds
 
-            batch_data_tensor = torch.stack(batch_data)
-            batch_labels_tensor = torch.stack(batch_labels)
 
-            if self.shuffle:
-                idx = torch.randperm(batch_labels_tensor.shape[0])
+# ------------------------------------------------------------------
+# usage
+# ------------------------------------------------------------------
+if __name__ == "__main__":
+    TRAIN_DIR    = "data/split/train"
+    NUM_CLASSES  = 8
+    WEIGHTS_PATH = Path("pos_weights.npy")
 
-                batch_data_tensor = batch_data_tensor[idx]
-                batch_labels_tensor = batch_labels_tensor[idx]
+    if not WEIGHTS_PATH.exists():
+        loader, ds = make_loader(TRAIN_DIR, shuffle=False)
+        for epoch in range(3):
+            ds.set_epoch(epoch)
+            for xyz_feats, labels in loader:
+                pass
 
-            yield batch_data_tensor, batch_labels_tensor
+        pos_weights = compute_pos_weights(TRAIN_DIR, NUM_CLASSES)
+        np.save(WEIGHTS_PATH, pos_weights)
+        print("pos_weights:", pos_weights)
+
+    pos_weights = np.load(WEIGHTS_PATH)
+    loader, ds  = make_loader(TRAIN_DIR, pos_weights=pos_weights, shuffle=True)
+
+    for epoch in range(100):
+        ds.set_epoch(epoch)
+        for xyz_feats, labels in loader:
+            # xyz_feats : (B, num_points, 4)  — x y z intensity
+            # labels    : (B, num_points, 1)  — class index
+            pass

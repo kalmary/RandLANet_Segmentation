@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 
 import torch.multiprocessing as mp
-from torch.utils.data import DataLoader
+from torch.utils.data import CustomDataset
 
 from RandLANet_CB import RandLANet
 
