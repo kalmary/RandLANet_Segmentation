@@ -23,6 +23,9 @@ from utils import load_json, load_model, convert_str_values
 from utils import get_dataset_len, calculate_class_weights, calculate_weighted_accuracy, compute_mIoU, FocalLoss_ArcFace, get_intLabels, get_Probabilities
 from utils import Plotter, ClassificationReport
 
+import mlflow
+from utils.model_serializer.src.config import MLFlowConfig
+from utils.model_serializer.src.tracker import MLFlowTracker
 
 def _eval_model(config_dict: dict,
                 model: nn.Module) -> tuple[list, list, np.ndarray, np.ndarray, np.ndarray]:
@@ -125,6 +128,8 @@ def eval_model_front(config_dict: dict,
                          pred=all_predictions,
                          target=all_labels,
                          additional_info=miou_report)
+    
+    return total_loss, miou, avg_iou_pc
 
 def test_function(config_dict: dict,
                   model):
@@ -200,6 +205,11 @@ def parser():
     return parser.parse_args()
 
 def main():
+    config = MLFlowConfig.from_json("src/utils/model_serializer/src/mlflow_config.json")
+    client = config.apply()
+
+    logger = MLFlowTracker(client=client, config=config)
+
     args = parser()
     base_path = pth.Path(__file__).parent
     device_name = args.device
@@ -216,20 +226,30 @@ def main():
     config_dict = load_json(model_path)
     config_dict = convert_str_values(config_dict)
     config_dict['device'] = device
+
+    test_dataset = config_dict.get("data_path_test")
+    logger.log_dataset(str(test_dataset))
     
+    logger.log_config(model_path)
+
     model = RandLANet(model_config=config_dict['model_config'], num_classes=config_dict['num_classes'])
     model = load_model(file_path=model_dir.joinpath(f'{model_name}.pt'),
                        model=model,
                        device=device)
+    
+    logger.log_model(model=model, model_name="Randlanet_evaluation_test")
+
     model.eval()
 
     if args.mode == 0:
         test_function(config_dict, model)
     elif args.mode == 1:
-        eval_model_front(config_dict=config_dict,
-                         model=model,
-                         paths=[model_path,
-                                plot_dir])
+        total_loss, miou, avg_iou_pc = eval_model_front(config_dict=config_dict,
+                                                        model=model,
+                                                        paths=[model_path,
+                                                                plot_dir])
+        logger.log_metrics({"total_loss": total_loss})
+        logger.log_metrics_artifact({"miou": miou, "avg_iou_pc": avg_iou_pc})
         
 
 
