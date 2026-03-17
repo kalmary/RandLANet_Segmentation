@@ -58,7 +58,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         total_t = get_dataset_len(trainLoader)
         total_v = get_dataset_len(valLoader)
 
-        class_weights_t = calculate_class_weights(loader = trainLoader, 
+        class_weights_t = calculate_clasts_weights(loader = trainLoader, 
                                                 num_classes=training_dict['num_classes'], 
                                                 method='effective',
                                                 total=total_t, 
