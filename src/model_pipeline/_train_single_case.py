@@ -1,3 +1,5 @@
+import pathlib as pth
+import sys
 import torch
 from torchinfo import summary
 import torch.optim as optim
@@ -5,7 +7,7 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 
 import torch.multiprocessing as mp
-from torch.utils.data import CustomDataset
+from _data_loader import CustomDataset
 
 from RandLANet_CB import RandLANet
 
@@ -15,7 +17,7 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from utils import compute_mIoU, calculate_weighted_accuracy
-from utils import calculate_class_weights, get_dataset_len, FocalLoss_ArcFace, FocalLoss
+from utils import compute_pos_weights, get_dataset_len, FocalLoss_ArcFace, FocalLoss
 from utils import wrap_hist
 
 from tqdm import tqdm
@@ -29,11 +31,11 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
     device_loader = device_gpu
     device_loss = device_gpu
 
-    train_dataset = Dataset(base_dir=training_dict['data_path_train'],
+    train_dataset = CustomDataset(base_dir=training_dict['data_path_train'],
                                       num_points=training_dict['num_points'],
                                       batch_size=training_dict['batch_size'],
-                                      shuffle=True,
-                                      device=device_loader)
+                                      buffer_size=50,
+                                      shuffle=True)
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
@@ -43,11 +45,11 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
 
 
-    val_dataset = Dataset(base_dir=training_dict['data_path_val'],
+    val_dataset = CustomDataset(base_dir=training_dict['data_path_val'],
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
-                                    shuffle=False,
-                                    device=device_loader)
+                                    buffer_size=50,
+                                    shuffle=False)
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,
@@ -58,46 +60,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         total_t = get_dataset_len(trainLoader)
         total_v = get_dataset_len(valLoader)
 
-        class_weights_t = calculate_clasts_weights(loader = trainLoader, 
-                                                num_classes=training_dict['num_classes'], 
-                                                method='effective',
-                                                total=total_t, 
-                                                device=device_loss,
-                                                verbose=False)
+        class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
+                                              num_classes=training_dict['num_classes'],
+                                              power=0.5)
         
-        class_weights_v = calculate_class_weights(loader = valLoader, 
-                                                num_classes=training_dict['num_classes'], 
-                                                method='effective',
-                                                total=total_v, 
-                                                device=device_loss,
-                                                verbose=False)
-        
-        train_dataset = Dataset(base_dir=training_dict['data_path_train'],
-                                    num_points=training_dict['num_points'],
-                                    batch_size=training_dict['batch_size'],
-                                    shuffle=True,
-                                    weights=class_weights_t,
-                                    device=device_loader)
-
-        trainLoader = DataLoader(train_dataset,
-                                batch_size=None,
-                                num_workers = 10,
-                                pin_memory=True)
-        
-
-
-
-        val_dataset = Dataset(base_dir=training_dict['data_path_val'],
-                                        num_points=training_dict['num_points'],
-                                        batch_size=training_dict['batch_size'],
-                                        shuffle=False,
-                                        weights=class_weights_v,
-                                        device=device_loader)
-
-        valLoader = DataLoader(val_dataset,
-                                batch_size=None,
-                                num_workers = 10,
-                                pin_memory=True)
+        class_weights_v = compute_pos_weights(data_dir=training_dict['data_path_val'],
+                                              num_classes=training_dict['num_classes'],
+                                              power=0.5)
 
 
 
@@ -109,24 +78,34 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         model.to(training_dict['device'])
 
+        
+        # criterion_t = FocalLoss(alpha=class_weights_t.to(device_loss),
+        #                         gamma=training_dict['focal_loss_gamma'],
+        #                         smoothing=0.1,
+        #                         reduction='mean').to(device_loss) # TODO double check - Labels smoothing is good for better generalization, but exact impact must be investigated
+        
+        # criterion_v = FocalLoss(alpha=class_weights_v.to(device_loss),
+        #                         gamma=training_dict['focal_loss_gamma'],
+        #                         smoothing=0.1,
+        #                         reduction='mean').to(device_loss)
+
 
         # criterion_t = FocalLoss_ArcFace(alpha=class_weights_t.to(device_loss),
-        #                                       gamma=training_dict['focal_loss_gamma'],
-        #                                       reduction='mean').to(device_loss) # TODO double check - Labels smoothing is good for better generalization, but exact impact must be investigated
+        #                   gamma=training_dict['focal_loss_gamma'],
+        #                   smoothing=0.1,
+        #                   reduction='mean').to(device_loss)
         
-        # criterion_v = FocalLoss_ArcFace(gamma=training_dict['focal_loss_gamma'],
-        #                                       alpha=class_weights_v.to(device_loss),
-        #                                       reduction='mean').to(device_loss)
+        # criterion_v = FocalLoss_ArcFace(alpha=class_weights_v.to(device_loss),
+        #                   gamma=training_dict['focal_loss_gamma'],
+        #                   smoothing=0.1,
+        #                   reduction='mean').to(device_loss)
+
+        criterion_t = nn.CrossEntropyLoss(weight=class_weights_t.to(device_loss),
+                                        label_smoothing=0.1).to(device_loss)
         
-        criterion_t = FocalLoss(alpha=class_weights_t.to(device_loss),
-                                gamma=training_dict['focal_loss_gamma'],
-                                smoothing=0.1,
-                                reduction='mean').to(device_loss) # TODO double check - Labels smoothing is good for better generalization, but exact impact must be investigated
-        
-        criterion_v = FocalLoss(alpha=class_weights_v.to(device_loss),
-                                gamma=training_dict['focal_loss_gamma'],
-                                smoothing=0.1,
-                                reduction='mean').to(device_loss)
+        criterion_v = nn.CrossEntropyLoss(weight=class_weights_v.to(device_loss),
+                                        label_smoothing=0.1).to(device_loss)
+
 
         optimizer = optim.AdamW(model.parameters(), lr = training_dict['learning_rate'], weight_decay=training_dict['weight_decay'])
 
@@ -166,10 +145,41 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
             for epoch in epoch_pbar:
 
+                train_dataset = CustomDataset(base_dir=training_dict['data_path_train'],
+                                    num_points=training_dict['num_points'],
+                                    batch_size=training_dict['batch_size'],
+                                    buffer_size=50,
+                                    shuffle=True,
+                                    pos_weights=class_weights_t,
+                                    epoch=epoch)
+
+                trainLoader = DataLoader(train_dataset,
+                                        batch_size=None,
+                                        num_workers = 10,
+                                        pin_memory=True)
+                
+
+
+
+                val_dataset = CustomDataset(base_dir=training_dict['data_path_val'],
+                                                num_points=training_dict['num_points'],
+                                                batch_size=training_dict['batch_size'],
+                                                buffer_size=50,
+                                                shuffle=False,
+                                                pos_weights=class_weights_v,
+                                                epoch=epoch)
+
+                valLoader = DataLoader(val_dataset,
+                                        batch_size=None,
+                                        num_workers = 10,
+                                        pin_memory=True)
+
+
+
+
                 epoch_loss_t = 0.
                 epoch_loss_v = 0.
 
-                epoch_accuracy_t = 0.
                 epoch_accuracy_v = 0.
 
                 epoch_samples_t = 0

@@ -11,8 +11,20 @@ import shutil
 # 1. Load + normalise intensity
 # ------------------------------------------------------------------
 def load_and_normalise(las_path):
-    las       = laspy.read(las_path)
-    xyz       = np.stack([las.x, las.y, las.z], axis=1).astype(np.float32)
+    las = laspy.read(las_path)
+    # keep float64 until after centering
+    xyz = np.stack([
+        np.asarray(las.x, dtype=np.float64),
+        np.asarray(las.y, dtype=np.float64),
+        np.asarray(las.z, dtype=np.float64),
+    ], axis=1)
+
+    # centre whole cloud before casting
+    xyz -= xyz.mean(axis=0)
+
+    # NOW safe to cast — values are small, float32 precision is fine
+    xyz = xyz.astype(np.float32)
+
     intensity = np.array(las.intensity, dtype=np.float32)
     intensity = intensity / (intensity.max() + 1e-6)
     feats     = intensity[:, None]
@@ -48,7 +60,7 @@ def voxel_subsample(xyz, feats, labels, voxel_size=0.10):
 # ------------------------------------------------------------------
 # 3. Tile splitting
 # ------------------------------------------------------------------
-SKIP_CLASSES = {1, 7}
+SKIP_CLASSES = {1, 7} # original 2, 8, after noise removal 1, 7
 
 def iter_tiles(xyz, feats, labels, tile_size=40.0):
     mins     = xyz[:, :2].min(0)
@@ -65,18 +77,17 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0):
                     (xyz[:, 0] >= x0) & (xyz[:, 0] < x0 + tile_size) &
                     (xyz[:, 1] >= y0) & (xyz[:, 1] < y0 + tile_size)
                 )
-                if mask.sum() < 512:
+                if mask.sum() < 16384:
                     pbar.set_postfix_str("skip — too few pts")
                     continue
 
-                tile_labels = labels[mask]
+                tile_labels = labels[mask] - 1 # rm empty class zero
                 if set(tile_labels.tolist()).issubset(SKIP_CLASSES):
                     pbar.set_postfix_str("skip — only ground/tree")
                     continue
 
                 tile_xyz        = xyz[mask].copy()
-                tile_xyz[:, 0] -= x0 + tile_size / 2
-                tile_xyz[:, 1] -= y0 + tile_size / 2
+                tile_xyz[:, :2] -= tile_xyz[:, :2].mean(axis=0)
 
                 pbar.set_postfix_str(f"{mask.sum():,} pts")
                 yield tile_xyz, feats[mask].copy(), tile_labels, (i, j)
@@ -106,6 +117,8 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
         xyz, feats, labels, tile_size
     ):
         name = f"{stem}_tile_{ti:03d}_{tj:03d}"
+
+        tile_xyz = tile_xyz.astype(np.float32)
 
         arr = np.concatenate(
             [tile_xyz, tile_feats, tile_labels[:, None].astype(np.float32)],
@@ -166,9 +179,9 @@ def split_dataset(cut_dir, out_dir, train=0.7, val=0.15, test=0.15, seed=42):
 # Entry point
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    LAS_FILES  = sorted(Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ").glob("*.laz"))
-    CUT_DIR    = Path("/home/kalmary/Dokumenty/tree_data/CUT")
-    SPLIT_DIR  = Path("/home/kalmary/Dokumenty/tree_data/SPLIT")
+    LAS_FILES  = sorted(Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/obrobione2").glob("*.las"))
+    CUT_DIR    = Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/decimated")
+    SPLIT_DIR  = Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed")
     VOXEL_SIZE = 0.10
     TILE_SIZE  = 40.0
 
