@@ -2,7 +2,6 @@ import numpy as np
 import laspy
 import pickle
 from pathlib import Path
-from scipy.spatial import KDTree
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
 import shutil
@@ -221,9 +220,9 @@ def split_dataset(cut_dir, out_dir, train=0.7, val=0.15, test=0.15, seed=42):
 # Entry point
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    LAS_FILES  = sorted(Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/obrobione2").glob("*.las"))
-    CUT_DIR    = Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/decimated")
-    SPLIT_DIR  = Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed")
+    LAS_FILES  = sorted(Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/raw").glob("*.las"))
+    CUT_DIR    = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/cut")
+    SPLIT_DIR  = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist")
     VOXEL_SIZE = 0.25
     TILE_SIZE  = 40.0
 
