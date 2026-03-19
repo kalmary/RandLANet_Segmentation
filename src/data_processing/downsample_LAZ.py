@@ -29,6 +29,10 @@ def load_and_normalise(las_path):
     intensity = intensity / (intensity.max() + 1e-6)
     feats     = intensity[:, None]
     labels    = np.array(las.classification, dtype=np.int32)
+
+    xyz = xyz[labels!=0]
+    feats = feats[labels!=0]
+    labels = labels[labels!=0]-1 # rm not classified
     del las
     return xyz, feats, labels
 
@@ -36,7 +40,7 @@ def load_and_normalise(las_path):
 # ------------------------------------------------------------------
 # 2. Voxel subsampling — closest point to cell center, one pass
 # ------------------------------------------------------------------
-def voxel_subsample(xyz, feats, labels, voxel_size=0.10):
+def voxel_subsample_iter(xyz, feats, labels, voxel_size=0.10):
     keys     = np.floor(xyz / voxel_size).astype(np.int32)
     centers  = (keys + 0.5) * voxel_size
     dists_sq = np.sum((xyz - centers) ** 2, axis=1)
@@ -54,6 +58,34 @@ def voxel_subsample(xyz, feats, labels, voxel_size=0.10):
             pbar.update(1)
 
     chosen = np.array(list(best_idx.values()), dtype=np.int32)
+    return xyz[chosen], feats[chosen], labels[chosen]
+
+def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
+    tqdm.write(f"  Starting voxel subsample: {len(xyz):, } pts...")
+    keys     = np.floor(xyz / voxel_size).astype(np.int32)
+    centers  = (keys + 0.5) * voxel_size
+    dists_sq = np.sum((xyz - centers) ** 2, axis=1)
+
+    keys_min  = keys.min(axis=0)
+    keys      = keys - keys_min
+    key_range = keys.max(axis=0) + 1
+
+    # explicit Python int — no numpy scalar overflow risk
+    rx, ry, rz = int(key_range[0]), int(key_range[1]), int(key_range[2])
+
+    key_enc = (keys[:, 0].astype(np.int64) * ry * rz +
+               keys[:, 1].astype(np.int64) * rz +
+               keys[:, 2].astype(np.int64))
+
+    assert (ry * rz * rx) < np.iinfo(np.int64).max, "key encoding overflow"
+
+    order      = np.lexsort((dists_sq, key_enc))
+    key_sorted = key_enc[order]
+    _, first   = np.unique(key_sorted, return_index=True)
+    chosen     = order[first]
+
+    tqdm.write(f"  voxel subsample: {len(xyz):,} → {len(chosen):,} pts")
+
     return xyz[chosen], feats[chosen], labels[chosen]
 
 
@@ -81,7 +113,7 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0):
                     pbar.set_postfix_str("skip — too few pts")
                     continue
 
-                tile_labels = labels[mask] - 1 # rm empty class zero
+                tile_labels = labels[mask]
                 if set(tile_labels.tolist()).issubset(SKIP_CLASSES):
                     pbar.set_postfix_str("skip — only ground/tree")
                     continue
@@ -105,14 +137,22 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
     tqdm.write(f"Processing: {las_path}")
 
     tqdm.write("  Loading + normalising intensity...")
-    xyz, feats, labels = load_and_normalise(las_path)
+    try:
+        xyz, feats, labels = load_and_normalise(las_path)
+    except Exception as e:
+        tqdm.write(f"    ERROR: {e}")
+        return
+    
     tqdm.write(f"  raw: {len(xyz):,} pts")
+    try:
+        xyz, feats, labels = voxel_subsample_vectorized(xyz, feats, labels, voxel_size)
+    except Exception as e:
+        tqdm.write(f"    ERROR: {e}")
+        xyz, feats, labels = voxel_subsample_iter(xyz, feats, labels, voxel_size)
 
-    xyz, feats, labels = voxel_subsample(xyz, feats, labels, voxel_size)
     tqdm.write(f"  after voxel subsample ({voxel_size}m): {len(xyz):,} pts")
 
     saved   = 0
-    skipped = 0
     for tile_xyz, tile_feats, tile_labels, (ti, tj) in iter_tiles(
         xyz, feats, labels, tile_size
     ):
@@ -132,7 +172,7 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
 
         saved += 1
 
-    tqdm.write(f"  saved {saved} tiles  |  skipped {skipped} tiles")
+    tqdm.write(f"  saved {saved} tiles.")
 
 
 # ------------------------------------------------------------------
