@@ -227,7 +227,7 @@ if __name__ == "__main__":
     VOXEL_SIZE = 0.25
     TILE_SIZE  = 40.0
 
-    # for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
-    #     save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
+    for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
+        save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
 
     split_dataset(CUT_DIR, SPLIT_DIR)
