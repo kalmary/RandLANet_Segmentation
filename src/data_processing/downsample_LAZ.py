@@ -3,6 +3,7 @@ import laspy
 import pickle
 from pathlib import Path
 from scipy.spatial import KDTree
+from sklearn.neighbors import KDTree
 from tqdm import tqdm
 import shutil
 
@@ -26,7 +27,7 @@ def load_and_normalise(las_path):
     xyz = xyz.astype(np.float32)
 
     intensity = np.array(las.intensity, dtype=np.float32)
-    intensity = intensity / (intensity.max() + 1e-6)
+    intensity = np.log1p(intensity) / np.log1p(intensity.max())
     feats     = intensity[:, None]
     labels    = np.array(las.classification, dtype=np.int32)
 
@@ -61,7 +62,7 @@ def voxel_subsample_iter(xyz, feats, labels, voxel_size=0.10):
     return xyz[chosen], feats[chosen], labels[chosen]
 
 def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
-    tqdm.write(f"  Starting voxel subsample: {len(xyz):, } pts...")
+    tqdm.write(f"  Starting voxel subsample: {xyz.shape[0], } pts...")
     keys     = np.floor(xyz / voxel_size).astype(np.int32)
     centers  = (keys + 0.5) * voxel_size
     dists_sq = np.sum((xyz - centers) ** 2, axis=1)
@@ -72,12 +73,13 @@ def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
 
     # explicit Python int — no numpy scalar overflow risk
     rx, ry, rz = int(key_range[0]), int(key_range[1]), int(key_range[2])
+    assert (ry * rz * rx) < np.iinfo(np.int64).max, "key encoding overflow"
 
     key_enc = (keys[:, 0].astype(np.int64) * ry * rz +
                keys[:, 1].astype(np.int64) * rz +
                keys[:, 2].astype(np.int64))
 
-    assert (ry * rz * rx) < np.iinfo(np.int64).max, "key encoding overflow"
+
 
     order      = np.lexsort((dists_sq, key_enc))
     key_sorted = key_enc[order]
@@ -94,7 +96,7 @@ def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
 # ------------------------------------------------------------------
 SKIP_CLASSES = {1, 7} # original 2, 8, after noise removal 1, 7
 
-def iter_tiles(xyz, feats, labels, tile_size=40.0):
+def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
     mins     = xyz[:, :2].min(0)
     maxs     = xyz[:, :2].max(0)
     x_starts = np.arange(mins[0], maxs[0], tile_size)
@@ -106,8 +108,8 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0):
             for j, y0 in enumerate(y_starts):
                 pbar.update(1)
                 mask = (
-                    (xyz[:, 0] >= x0) & (xyz[:, 0] < x0 + tile_size) &
-                    (xyz[:, 1] >= y0) & (xyz[:, 1] < y0 + tile_size)
+                    (xyz[:, 0] >= x0 - overlap) & (xyz[:, 0] < x0 + tile_size + overlap) &
+                    (xyz[:, 1] >= y0 - overlap) & (xyz[:, 1] < y0 + tile_size + overlap)
                 )
                 if mask.sum() < 16384:
                     pbar.set_postfix_str("skip — too few pts")
@@ -222,10 +224,10 @@ if __name__ == "__main__":
     LAS_FILES  = sorted(Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/obrobione2").glob("*.las"))
     CUT_DIR    = Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/decimated")
     SPLIT_DIR  = Path("/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed")
-    VOXEL_SIZE = 0.10
+    VOXEL_SIZE = 0.25
     TILE_SIZE  = 40.0
 
-    for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
-        save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
+    # for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
+    #     save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
 
     split_dataset(CUT_DIR, SPLIT_DIR)

@@ -31,7 +31,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
     device_loader = device_gpu
     device_loss = device_gpu
 
-    train_dataset = CustomDataset(base_dir=training_dict['data_path_train'],
+    train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
                                       num_points=training_dict['num_points'],
                                       batch_size=training_dict['batch_size'],
                                       buffer_size=50,
@@ -39,13 +39,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
-                             num_workers = 10,
+                             num_workers = 15,
                              pin_memory=True)
     
 
 
 
-    val_dataset = CustomDataset(base_dir=training_dict['data_path_val'],
+    val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
                                     buffer_size=50,
@@ -53,7 +53,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,
-                             num_workers = 10,
+                             num_workers = 15,
                              pin_memory=True)
     try:
 
@@ -61,18 +61,18 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         total_v = get_dataset_len(valLoader)
 
         class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
-                                              num_classes=training_dict['num_classes'],
-                                              power=0.5)
+                                                num_classes=training_dict['num_classes'],
+                                                power=0.5)
         
         class_weights_v = compute_pos_weights(data_dir=training_dict['data_path_val'],
-                                              num_classes=training_dict['num_classes'],
-                                              power=0.5)
+                                                num_classes=training_dict['num_classes'],
+                                                power=0.5)
 
 
 
         if training_dict['model'] is None:
             model = RandLANet(model_config=training_dict['model_config'],
-                            num_classes=training_dict['num_classes'])
+                            n_classes=training_dict['num_classes'])
         else:
             model = training_dict['model']
 
@@ -145,33 +145,33 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
             for epoch in epoch_pbar:
 
-                train_dataset = CustomDataset(base_dir=training_dict['data_path_train'],
+                train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
                                     buffer_size=50,
                                     shuffle=True,
-                                    pos_weights=class_weights_t,
+                                    pos_weights=class_weights_t.numpy(),
                                     epoch=epoch)
 
                 trainLoader = DataLoader(train_dataset,
                                         batch_size=None,
-                                        num_workers = 10,
+                                        num_workers = 15,
                                         pin_memory=True)
                 
 
 
 
-                val_dataset = CustomDataset(base_dir=training_dict['data_path_val'],
+                val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
                                                 num_points=training_dict['num_points'],
                                                 batch_size=training_dict['batch_size'],
                                                 buffer_size=50,
                                                 shuffle=False,
-                                                pos_weights=class_weights_v,
+                                                pos_weights=class_weights_v.numpy(),
                                                 epoch=epoch)
 
                 valLoader = DataLoader(val_dataset,
                                         batch_size=None,
-                                        num_workers = 10,
+                                        num_workers = 15,
                                         pin_memory=True)
 
 
@@ -190,7 +190,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                 progressbar_t = tqdm(trainLoader, 
                                         desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
-                                        total=total_t, 
+                                        # total=total_t, 
                                         position=3,
                                         leave=False)
                 
@@ -236,7 +236,9 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 acc_hist.append(-1.)  # Not computed for training
                 miou_hist.append(-1.)  # Not computed for training
 
-                progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
+                progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", 
+                                    #  total=total_v,
+                                    position=3, leave=False)
                 model.eval()
 
                 with torch.no_grad():
@@ -250,7 +252,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         loss_v = criterion_v(outputs, batch_y)
 
-                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v)
+                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v.cpu())
 
                         mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
 
