@@ -59,7 +59,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
                                                 num_classes=training_dict['num_classes'],
-                                                power=0.0)
+                                                power=1.)
 
         print(f"Class weights for training: {class_weights_t}")
         
