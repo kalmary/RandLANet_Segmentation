@@ -57,9 +57,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                              pin_memory=True)
     try:
 
-        total_t = get_dataset_len(trainLoader)
-        total_v = get_dataset_len(valLoader)
-
         class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
                                                 num_classes=training_dict['num_classes'],
                                                 power=0.5)
@@ -68,6 +65,36 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                                 num_classes=training_dict['num_classes'],
                                                 power=0.5)
 
+
+        train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
+                    num_points=training_dict['num_points'],
+                    batch_size=training_dict['batch_size'],
+                    buffer_size=50,
+                    shuffle=True,
+                    pos_weights=class_weights_t.numpy(),
+                    epoch=epoch)
+
+        trainLoader = DataLoader(train_dataset,
+                                batch_size=None,
+                                num_workers = 15,
+                                pin_memory=True)
+
+
+        val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
+                                        num_points=training_dict['num_points'],
+                                        batch_size=training_dict['batch_size'],
+                                        buffer_size=50,
+                                        shuffle=False,
+                                        pos_weights=class_weights_v.numpy(),
+                                        epoch=epoch)
+
+        valLoader = DataLoader(val_dataset,
+                                batch_size=None,
+                                num_workers = 15,
+                                pin_memory=True)
+
+        total_t = get_dataset_len(trainLoader)
+        total_v = get_dataset_len(valLoader)
 
 
         if training_dict['model'] is None:
@@ -252,7 +279,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         loss_v = criterion_v(outputs, batch_y)
 
-                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v.cpu())
+                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v.to(device_loss))
 
                         mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
 
