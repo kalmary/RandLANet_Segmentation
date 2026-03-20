@@ -281,7 +281,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v.to(device_loss))
 
-                        mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+                        mIoU, _ = compute_mIoU(outputs.cpu(), batch_y.cpu(), training_dict['num_classes'])
 
 
                         epoch_loss_v += loss_v.item() * batch_y.size(0)
