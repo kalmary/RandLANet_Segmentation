@@ -72,7 +72,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                     buffer_size=50,
                     shuffle=True,
                     pos_weights=class_weights_t.numpy(),
-                    epoch=epoch)
+                    epoch=0)
 
         trainLoader = DataLoader(train_dataset,
                                 batch_size=None,
@@ -86,7 +86,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                         buffer_size=50,
                                         shuffle=False,
                                         pos_weights=class_weights_v.numpy(),
-                                        epoch=epoch)
+                                        epoch=0)
 
         valLoader = DataLoader(val_dataset,
                                 batch_size=None,
