@@ -59,11 +59,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
                                                 num_classes=training_dict['num_classes'],
-                                                power=0.05)
+                                                power=0.25)
         
         class_weights_v = compute_pos_weights(data_dir=training_dict['data_path_val'],
                                                 num_classes=training_dict['num_classes'],
-                                                power=0.05)
+                                                power=0.25
+        )
 
 
         train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
