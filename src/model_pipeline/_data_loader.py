@@ -30,10 +30,10 @@ class CustomDataset(IterableDataset):
                  buffer_size:           int        = 64,
                  shuffle:               bool       = True,
                  pos_weights:           np.ndarray = None,
-                 coverage_thresh:       float      = 0.5,
-                 epsilon:               float      = -0.1,
-                 grid_res:              float      = 1.,
-                 gaussian_sigma_factor: float      = 3.0,
+                 coverage_thresh:       float      = 0.6,
+                 epsilon:               float      = -0.05,
+                 grid_res:              float      = 2.,
+                 gaussian_sigma_factor: float      = 4.,
                  epoch:                 int        = 0):
         """
         coverage_thresh:       possibility threshold — point satisfied when poss >= this
