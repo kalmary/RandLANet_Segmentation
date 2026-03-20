@@ -217,7 +217,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                 progressbar_t = tqdm(trainLoader, 
                                         desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
-                                        # total=total_t, 
+                                        total=total_t, 
                                         position=3,
                                         leave=False)
                 
@@ -264,7 +264,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 miou_hist.append(-1.)  # Not computed for training
 
                 progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", 
-                                    #  total=total_v,
+                                     total=total_v,
                                     position=3, leave=False)
                 model.eval()
 
