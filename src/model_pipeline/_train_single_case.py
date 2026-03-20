@@ -34,12 +34,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
     train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
                                       num_points=training_dict['num_points'],
                                       batch_size=training_dict['batch_size'],
-                                      buffer_size=50,
+                                      buffer_size=150,
                                       shuffle=True)
 
     trainLoader = DataLoader(train_dataset,
                              batch_size=None,
-                             num_workers = 15,
+                             num_workers = 7,
                              pin_memory=True)
     
 
@@ -48,12 +48,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
     val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
-                                    buffer_size=50,
+                                    buffer_size=150,
                                     shuffle=False)
 
     valLoader = DataLoader(val_dataset,
                              batch_size=None,
-                             num_workers = 15,
+                             num_workers = 7,
                              pin_memory=True)
     try:
 
@@ -71,28 +71,28 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
                     num_points=training_dict['num_points'],
                     batch_size=training_dict['batch_size'],
-                    buffer_size=50,
+                    buffer_size=150,
                     shuffle=True,
                     pos_weights=class_weights_t.numpy(),
                     epoch=0)
 
         trainLoader = DataLoader(train_dataset,
                                 batch_size=None,
-                                num_workers = 15,
+                                num_workers = 7,
                                 pin_memory=True)
 
 
         val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
                                         num_points=training_dict['num_points'],
                                         batch_size=training_dict['batch_size'],
-                                        buffer_size=50,
+                                        buffer_size=150,
                                         shuffle=False,
                                         pos_weights=class_weights_v.numpy(),
                                         epoch=0)
 
         valLoader = DataLoader(val_dataset,
                                 batch_size=None,
-                                num_workers = 15,
+                                num_workers = 7,
                                 pin_memory=True)
 
         total_t = get_dataset_len(trainLoader)
@@ -177,14 +177,14 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
                                     num_points=training_dict['num_points'],
                                     batch_size=training_dict['batch_size'],
-                                    buffer_size=50,
+                                    buffer_size=150,
                                     shuffle=True,
                                     pos_weights=class_weights_t.numpy(),
                                     epoch=epoch)
 
                 trainLoader = DataLoader(train_dataset,
                                         batch_size=None,
-                                        num_workers = 15,
+                                        num_workers = 7,
                                         pin_memory=True)
                 
 
@@ -193,14 +193,14 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
                                                 num_points=training_dict['num_points'],
                                                 batch_size=training_dict['batch_size'],
-                                                buffer_size=50,
+                                                buffer_size=150,
                                                 shuffle=False,
                                                 pos_weights=class_weights_v.numpy(),
                                                 epoch=epoch)
 
                 valLoader = DataLoader(val_dataset,
                                         batch_size=None,
-                                        num_workers = 15,
+                                        num_workers = 7,
                                         pin_memory=True)
 
 
