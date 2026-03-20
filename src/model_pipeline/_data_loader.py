@@ -83,7 +83,6 @@ class CustomDataset(IterableDataset):
         _, inverse = np.unique(cell_enc, return_inverse=True)
         n_cells    = _.shape[0]
 
-        # np.bincount with weights — faster than np.add.at
         point_w      = w[labels].astype(np.float64)
         cell_w_sum   = np.bincount(inverse, weights=point_w, minlength=n_cells).astype(np.float32)
         cell_w_count = np.bincount(inverse,                  minlength=n_cells).astype(np.float32)
@@ -91,11 +90,15 @@ class CustomDataset(IterableDataset):
 
         point_cell_w = cell_w[inverse]
         point_cls_w  = point_w.astype(np.float32)
-        combined_w   = 0.5 * point_cell_w + 0.5 * point_cls_w
+        combined_w   = 0.5 * point_cell_w + 0.5 * point_cls_w  # (N,) in [0, 1]
 
-        poss  = (1.0 - combined_w).astype(np.float32)
+        # scale so most common class (combined_w≈0) starts at common_class_start
+        # and rarest class (combined_w≈1) starts at 0.0
+        common_class_start = 0.35
+        poss  = (common_class_start * (1.0 - combined_w)).astype(np.float32)
         poss += np.random.uniform(0, 0.05, n).astype(np.float32)
         return poss
+
 
 
     def _build_point_thresh(self, labels: np.ndarray) -> np.ndarray:
@@ -130,7 +133,7 @@ class CustomDataset(IterableDataset):
 
         poss         = self._build_possibility(xyz, labels)
         point_thresh = self._build_point_thresh(labels)
-        gap          = poss - point_thresh   # precomputed, updated in-place
+        gap          = poss - point_thresh
 
         while gap.min() < 0:
             center_idx   = int(np.argmin(gap))
@@ -138,14 +141,14 @@ class CustomDataset(IterableDataset):
 
             neighbor_idx = kdtree.query(
                 center[None], k=self.num_points, return_distance=False
-            )[0].flatten()
-            # _, neighbor_idx = kdtree.query(center[None], k=self.num_points)
-            # neighbor_idx = neighbor_idx[0] 
+            )[0].astype(np.int32)
 
-            dists                = np.linalg.norm(xyz[neighbor_idx] - center, axis=1)
-            delta                = (1.0 - dists / (dists.max() + 1e-6)) ** 2
-            poss[neighbor_idx]  += delta
-            gap[neighbor_idx]   += delta   # mirrors poss update
+            dists  = np.linalg.norm(xyz[neighbor_idx] - center, axis=1)
+            sigma  = dists.max() / self.gaussian_sigma_factor
+            delta  = np.exp(-(dists ** 2) / (2 * sigma ** 2 + 1e-6))
+
+            poss[neighbor_idx] += delta
+            gap[neighbor_idx]  += delta
 
             xyz_feats = np.concatenate(
                 [xyz[neighbor_idx] - center, feats[neighbor_idx]], axis=1
