@@ -32,7 +32,7 @@ class CustomDataset(IterableDataset):
                  pos_weights:           np.ndarray = None,
                  coverage_thresh:       float      = 0.5,
                  epsilon:               float      = -0.01,
-                 grid_res:              float      = 2.5,
+                 grid_res:              float      = 2.75,
                  gaussian_sigma_factor: float      = 2.,
                  epoch:                 int        = 0):
         """
