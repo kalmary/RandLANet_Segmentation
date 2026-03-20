@@ -30,8 +30,8 @@ class CustomDataset(IterableDataset):
                  buffer_size:           int        = 64,
                  shuffle:               bool       = True,
                  pos_weights:           np.ndarray = None,
-                 coverage_thresh:       float      = 0.6,
-                 epsilon:               float      = -0.05,
+                 coverage_thresh:       float      = 0.5,
+                 epsilon:               float      = -0.07,
                  grid_res:              float      = 2.,
                  gaussian_sigma_factor: float      = 4.,
                  epoch:                 int        = 0):
