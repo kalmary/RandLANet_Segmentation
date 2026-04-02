@@ -2,9 +2,9 @@
     "train_repeat": 4,
     "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
 
-    "data_path_train": "//home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist/train",
-    "data_path_test": "/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist/test",
-    "data_path_val": "/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist/val",
+    "data_path_train": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed/train",
+    "data_path_test": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed/test",
+    "data_path_val": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed/val",
     
     "num_classes": 10,
     "batch_size": 6,
