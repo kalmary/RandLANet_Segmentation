@@ -536,7 +536,6 @@ def argparser():
     Returns parsed arguments with validation for device choices and formatted help text display.
     """
 
-    default_name = 'ResNet_0'
     parser = argparse.ArgumentParser(
         description="Script for training the model based on predefined range of scenarios",
         formatter_class=argparse.RawTextHelpFormatter
@@ -545,11 +544,9 @@ def argparser():
     parser.add_argument(
         '--model_name',
         type=str,
-        default=default_name,
         help=(
             "Base of the model's name.\n"
-            "When iterating, name also gets an ID. \n"
-            f"If not given, defaults to: {default_name}."
+            "When iterating, name also gets an ID."
         )
     )
 

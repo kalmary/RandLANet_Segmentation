@@ -102,7 +102,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
     if training_dict['model'] is None:
         model = RandLANet(model_config=training_dict['model_config'],
-                        num_classes=training_dict['num_classes'])
+                        n_classes=training_dict['num_classes'])
     else:
         model = training_dict['model']
 

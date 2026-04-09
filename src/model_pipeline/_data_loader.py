@@ -143,6 +143,7 @@ class Dataset(IterableDataset):
             if features_tensor is not None:
                 cloud_tensor = torch.cat([cloud_tensor, features_tensor], dim=1)
 
+
             yield cloud_tensor, labels_tensor
 
     def __iter__(self):
