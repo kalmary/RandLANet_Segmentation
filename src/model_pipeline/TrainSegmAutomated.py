@@ -237,7 +237,7 @@ class Checkpoint:
             self.final_val_best = final_val
         
         if not self.save_new:
-            return [model, exp_config, config_path]
+            return model, exp_config, config_path
 
         if not self.existing_ok:
                 for file_path in plot_dir.iterdir():
@@ -324,7 +324,7 @@ def case_based_training(exp_configs: list[dict],
 
             final_val = result_hist['acc_v_hist'][-1]*0.6 + (1 / (1 + result_hist['loss_v_hist'][-1]))*0.4
 
-            model, best_config, config_path, result_hist = checkpoint.check_checkpoint(model, model_name, final_val, exp_config, result_hist)
+            model, best_config, config_path = checkpoint.check_checkpoint(model, model_name, final_val, exp_config, result_hist)
     
     logger.info(f'Best model saved to: {model_path}')
     logger.info(f'Best config saved to: {config_path}')

@@ -1,19 +1,19 @@
 {
     "train_repeat": 4,
     "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
-    "data_path_train": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed/train.h5",
-    "data_path_test": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed/test.h5",
-    "data_path_val": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/distributed/validation.h5",
+    "data_path_train": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/distributed/train.h5",
+    "data_path_test": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/distributed/test.h5",
+    "data_path_val": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/distributed/validation.h5",
     "num_classes": 10,
     "batch_size": 6,
     "num_points": 8192,
     "num_neighbors": 16,
-    "epochs": 100,
-    "focal_loss_gamma": 1.0,
+    "epochs": 75,
+    "focal_loss_gamma": 2.0,
     "learning_rate": 0.001,
-    "weight_decay": 0.01,
+    "weight_decay": 0.001,
     "scheduler_params_comment": [],
     "pc_start": 0.4,
-    "div_factor": 100,
-    "final_div_factor": 10000
+    "div_factor": 30,
+    "final_div_factor": 684
 }
