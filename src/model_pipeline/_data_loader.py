@@ -117,27 +117,6 @@ class Dataset(IterableDataset):
                 features_tensor = features_tensor[idx]
                 labels_tensor = labels_tensor[idx]
 
-            # if self.sampling_weights is not None and self.shuffle:
-
-            #     # FIX: use local variable, never touch self.weights
-            #     point_weights = self.sampling_weights[labels_tensor.long()]
-            #     cloud_tensor, features_tensor, labels_tensor = self._balance_point_cloud(
-            #         cloud_tensor, features_tensor, labels_tensor, point_weights
-            #     )
-
-            # if self.shuffle:
-            #     cloud_tensor = cloud_tensor.to(self.device)
-            #     cloud_tensor = add_gaussian_noise(cloud_tensor, std=0.05)
-            #     cloud_tensor = rotate_points(cloud_tensor, device=self.device)
-            #     cloud_tensor = tilt_points(cloud_tensor,
-            #                                max_x_tilt_degrees=5,
-            #                                max_y_tilt_degrees=5)
-            #     # cloud_tensor = transform_points(cloud_tensor,
-            #     #                                 min_scale=0.95,
-            #     #                                 max_scale=1.05,
-            #     #                                 device=self.device)
-            #     cloud_tensor = cloud_tensor.cpu()
-
             cloud_tensor -= cloud_tensor.mean(dim=0)
 
             if features_tensor is not None:

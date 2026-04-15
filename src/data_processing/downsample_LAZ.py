@@ -85,10 +85,12 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
                 classification = np.asarray(las.classification, dtype=np.int32)
                 intensity = np.asarray(las.intensity, dtype=np.float32)
-
                 
+
                 points = points[classification > cut_label]
                 intensity = intensity[classification > cut_label]
+                intensity = np.log1p(intensity) / np.log1p(intensity.max())
+                
                 classification = classification[classification > cut_label]
                 classification -= 1
 

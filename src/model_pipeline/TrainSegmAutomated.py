@@ -111,8 +111,8 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
     """
     Load configuration files and prepare experiment configurations for training.
     mode:
-    0 - single_training
-    1 - multiple trainings, grid_based
+    0 - test
+    1 - single training
     2 - multiple trainings, with optuna
     
     """
@@ -367,6 +367,8 @@ def objective_function(trial: optuna.Trial,
     fin_div_factor = trial.suggest_int('final_div_factor', exp_config['final_div_factor'][0], exp_config['final_div_factor'][1], log=True)
     num_neighbors = trial.suggest_int('num_neighbors', exp_config['num_neighbors'][0], exp_config['num_neighbors'][1], step = exp_config['num_neighbors'][2])
     num_points = trial.suggest_int('num_points', exp_config['num_points'][0], exp_config['num_points'][1], step = exp_config['num_points'][2])
+
+
 
     model_config.update({
         'num_neighbors': num_neighbors

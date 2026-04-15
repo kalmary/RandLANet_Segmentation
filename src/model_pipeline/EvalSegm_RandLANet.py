@@ -20,7 +20,7 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from utils import load_json, load_model, convert_str_values
-from utils import get_dataset_len, calculate_class_weights, calculate_weighted_accuracy, compute_mIoU, FocalLoss_ArcFace, get_intLabels, get_Probabilities
+from utils import get_dataset_len, compute_pos_weights_h5, compute_mIoU, FocalLoss, get_intLabels, get_Probabilities
 from utils import Plotter, ClassificationReport
 
 
@@ -44,18 +44,15 @@ def _eval_model(config_dict: dict,
                              pin_memory=False)
 
     total = get_dataset_len(testLoader, verbose=False)
-    weights = calculate_class_weights(testLoader, 
+    weights = compute_pos_weights_h5(config_dict['data_path_test'], 
                                       config_dict['num_classes'], 
-                                      total=total, 
-                                      device=device_loader,
-                                      verbose=False)
+                                      power=0.25)
     weights = weights.to(device_loss)
     
-    criterion = FocalLoss_ArcFace(alpha=weights.to(device_loss),
+    criterion = FocalLoss(alpha=weights.to(device_loss),
                                 gamma=config_dict['focal_loss_gamma']).to(device_loss)
 
     loss_per_epoch = 0.
-    accuracy_per_epoch = 0.0
     epoch_samples = 0
 
     all_predictions = []
@@ -94,7 +91,7 @@ def _eval_model(config_dict: dict,
             all_probs = np.concatenate([all_probs, probs.reshape(-1, config_dict['num_classes'])], axis=0)
             all_predictions.extend(int_preds)
 
-    return total_loss, np.asarray(all_labels), all_probs.reshape(-1, config_dict['num_classes']), np.asarray(all_predictions)
+    return total_loss, np.asarray(all_labels), np.asarray(all_predictions)
 
 def eval_model_front(config_dict: dict,
          model: nn.Module,
@@ -217,7 +214,7 @@ def main():
     config_dict = convert_str_values(config_dict)
     config_dict['device'] = device
     
-    model = RandLANet(model_config=config_dict['model_config'], num_classes=config_dict['num_classes'])
+    model = RandLANet(model_config=config_dict['model_config'], n_classes=config_dict['num_classes'])
     model = load_model(file_path=model_dir.joinpath(f'{model_name}.pt'),
                        model=model,
                        device=device)
