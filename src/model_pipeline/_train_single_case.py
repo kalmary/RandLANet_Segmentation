@@ -16,11 +16,17 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from utils import compute_mIoU, calculate_accuracy
-from utils import compute_pos_weights_h5, get_dataset_len, FocalLoss_ArcFace, FocalLoss
+from utils import compute_pos_weights_h5, get_dataset_len, FocalLoss
 from utils import wrap_hist
 
 from tqdm import tqdm
 from typing import Union, Generator
+from dataclasses import dataclass
+
+@dataclass
+class dummy_pruner:
+    should_prune = False
+
 
 def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], None, None],
                                               Generator[tuple[None, dict], None, None]]:
@@ -65,7 +71,8 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                         num_classes=training_dict['num_classes'],
                                         power=0.25)
     
-    early_stop = EarlyStopping(patience=10, delta=0.001, mode="maximize", verbose=False)
+    early_stop = dummy_pruner()
+    # early_stop = EarlyStopping(patience=10, delta=0.001, mode="maximize", verbose=False)
 
     try:
 
