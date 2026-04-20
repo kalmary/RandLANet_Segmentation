@@ -3,6 +3,7 @@ from torchinfo import summary
 import torch.optim as optim
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
+from utils import EarlyStopping
 
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
@@ -53,20 +54,20 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                              batch_size=None,
                              num_workers = 15,
                              pin_memory=True)
+    
+    total_t = get_dataset_len(trainLoader)
+    total_v = get_dataset_len(valLoader)
+    class_weights_t = compute_pos_weights_h5(h5_path=training_dict['data_path_train'],
+                                             num_classes=training_dict['num_classes'],
+                                        power=0.25)
+    
+    class_weights_v = compute_pos_weights_h5(h5_path=training_dict['data_path_val'],
+                                        num_classes=training_dict['num_classes'],
+                                        power=0.25)
+    
+    early_stop = EarlyStopping(patience=10, delta=0.001, mode="maximize", verbose=False)
+
     try:
-
-        total_t = get_dataset_len(trainLoader)
-        total_v = get_dataset_len(valLoader)
-
-        class_weights_t = compute_pos_weights_h5(h5_path=training_dict['data_path_train'],
-                                            num_classes=training_dict['num_classes'],
-                                            power=0.25)
-        
-        class_weights_v = compute_pos_weights_h5(h5_path=training_dict['data_path_val'],
-                                            num_classes=training_dict['num_classes'],
-                                            power=0.25)
-
-
 
         if training_dict['model'] is None:
             model = RandLANet(model_config=training_dict['model_config'],
@@ -76,14 +77,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         model.to(training_dict['device'])
 
-
-        # criterion_t = FocalLoss_ArcFace(alpha=class_weights_t.to(device_loss),
-        #                                       gamma=training_dict['focal_loss_gamma'],
-        #                                       reduction='mean').to(device_loss) # TODO double check - Labels smoothing is good for better generalization, but exact impact must be investigated
-        
-        # criterion_v = FocalLoss_ArcFace(gamma=training_dict['focal_loss_gamma'],
-        #                                       alpha=class_weights_v.to(device_loss),
-        #                                       reduction='mean').to(device_loss)
         
         criterion_t = FocalLoss(alpha=class_weights_t.to(device_loss),
                                 gamma=training_dict['focal_loss_gamma'],
@@ -232,7 +225,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 acc_v_hist.append(avg_accuracy_v)
                 miou_v_hist.append(avg_miou_v)
 
-                # early_stopping.check_early_stop(loss_v_hist[-1])
+
 
                 hist_dict = wrap_hist(acc_hist = acc_hist,
                                         loss_hist = loss_hist,
@@ -240,8 +233,9 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                         acc_v_hist = acc_v_hist,
                                         loss_v_hist = loss_v_hist,
                                         miou_v_hist = miou_v_hist)
-
-                yield model, hist_dict
+                
+                early_stop.check_early_stop(avg_accuracy_v)
+                yield model, hist_dict, early_stop.stop_training
 
 
                 epoch_pbar.set_postfix({
@@ -258,4 +252,4 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         except Exception as e:
             pass
         torch.cuda.empty_cache()
-        yield None, {}
+        yield None, {}, True

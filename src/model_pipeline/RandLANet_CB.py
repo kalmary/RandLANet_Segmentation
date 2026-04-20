@@ -20,7 +20,6 @@ def input_norm(input: torch.Tensor, max_voxel_dim=20.):
     input[..., :2] -= input[..., :2].mean(dim=1, keepdim=True)
     input[..., 2]  -= input[..., 2].min(dim=1, keepdim=True)[0]
     input[..., :3] /= max_voxel_dim
-    input[..., 3] /= 10
 
 
     return input

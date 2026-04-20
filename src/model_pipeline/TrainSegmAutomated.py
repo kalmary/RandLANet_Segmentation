@@ -186,7 +186,7 @@ def test_case(exp_config: dict) -> None:
     exp_config['epochs'] = 2
     
     try:
-        for _, _ in train_model(training_dict=exp_config):
+        for _, _, _ in train_model(training_dict=exp_config):
             pass
     except Exception as e:
         logger.error(f'ERROR: test_case. Error message: {e}')
@@ -319,12 +319,15 @@ def case_based_training(exp_configs: list[dict],
     for i, exp_config in pbar:
         logger.info(f'Case {i+1}/{len(exp_configs)}: {exp_config}')
 
-        for model, result_hist in train_model(training_dict=exp_config):
+        for model, result_hist, should_prune in train_model(training_dict=exp_config):
             logger.info(f'Single model was generated. val_acc: {result_hist["acc_v_hist"][-1]:.3f}  val_loss: {result_hist["loss_v_hist"][-1]:.3f}')
 
             final_val = result_hist['acc_v_hist'][-1]*0.6 + (1 / (1 + result_hist['loss_v_hist'][-1]))*0.4
 
             model, best_config, config_path = checkpoint.check_checkpoint(model, model_name, final_val, exp_config, result_hist)
+
+            if should_prune:
+                break
     
     logger.info(f'Best model saved to: {model_path}')
     logger.info(f'Best config saved to: {config_path}')
@@ -405,7 +408,7 @@ def objective_function(trial: optuna.Trial,
     best_val_loss = float('inf')
     best_val_miou = 0.0
 
-    for epoch_idx, (model, result_hist) in enumerate(train_model(training_dict=exp_config)):
+    for epoch_idx, (model, result_hist, should_prune) in enumerate(train_model(training_dict=exp_config)):
         
         if model is None or result_hist == {}:
             logger.error(f'ERROR: objective_function. Empty result_hist. Trial pruned.')
@@ -437,7 +440,7 @@ def objective_function(trial: optuna.Trial,
         # report acutal results for prunning
         trial.report(final_val, step=epoch_idx)
 
-        if trial.should_prune():
+        if trial.should_prune() or should_prune:
             logger.info(f'Pruning trial: {trial.number}')
             raise optuna.exceptions.TrialPruned()
         

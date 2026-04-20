@@ -76,31 +76,6 @@ class Dataset(IterableDataset):
 
                 yield from data
 
-    def _balance_point_cloud(self, cloud_tensor, features_tensor, labels_tensor, point_weights):
-        """
-        Resample points within a point cloud to balance classes using provided weights.
-        
-        Returns:
-            Resampled cloud_tensor, features_tensor, labels_tensor (all same length)
-        """
-        if point_weights is None:
-            return cloud_tensor, features_tensor, labels_tensor
-
-        point_weights = point_weights / (point_weights.sum() + 1e-10)
-
-        try:
-            num_samples = min(self.num_points, len(labels_tensor))
-            indices = torch.multinomial(point_weights, num_samples, replacement=True)
-
-            cloud_tensor = cloud_tensor[indices]
-            features_tensor = features_tensor[indices]
-            labels_tensor = labels_tensor[indices]
-
-        except RuntimeError as e:
-            print(f"Warning: Point cloud resampling failed: {e}")
-
-        return cloud_tensor, features_tensor, labels_tensor
-
     def _process_cloud(self):
         for cloud in self._key_streamer():
             cloud_tensor = cloud[:, :3]
