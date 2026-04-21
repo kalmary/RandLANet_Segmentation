@@ -320,14 +320,17 @@ def case_based_training(exp_configs: list[dict],
         logger.info(f'Case {i+1}/{len(exp_configs)}: {exp_config}')
 
         for model, result_hist, should_prune in train_model(training_dict=exp_config):
+
+            if should_prune:
+                break
+
             logger.info(f'Single model was generated. val_acc: {result_hist["acc_v_hist"][-1]:.3f}  val_loss: {result_hist["loss_v_hist"][-1]:.3f}')
 
             final_val = result_hist['acc_v_hist'][-1]*0.6 + (1 / (1 + result_hist['loss_v_hist'][-1]))*0.4
 
             model, best_config, config_path = checkpoint.check_checkpoint(model, model_name, final_val, exp_config, result_hist)
 
-            if should_prune:
-                break
+
     
     logger.info(f'Best model saved to: {model_path}')
     logger.info(f'Best config saved to: {config_path}')

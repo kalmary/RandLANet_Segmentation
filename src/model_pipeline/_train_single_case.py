@@ -20,12 +20,17 @@ from utils import compute_pos_weights_h5, get_dataset_len, FocalLoss
 from utils import wrap_hist
 
 from tqdm import tqdm
-from typing import Union, Generator
+from typing import Union, Generator, Any
 from dataclasses import dataclass
 
 @dataclass
 class dummy_pruner:
-    should_prune = False
+    stop_training = False
+
+    @staticmethod
+    def check_early_stop(arg: Any) -> None:
+        #dummy function
+        pass
 
 
 def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], None, None],

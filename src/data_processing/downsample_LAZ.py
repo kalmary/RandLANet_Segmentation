@@ -9,7 +9,6 @@ import sys
 import random
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
 
 import laspy
 import numpy as np
@@ -19,7 +18,7 @@ main_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(main_dir))
 
 from utils.pcd_manipulation import voxelGridFragmentation
-from utils import convert_str_values, load_json, save2json
+from utils import convert_str_values, load_json, save2json, LogScaler
 import open3d as o3d
 
 def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dict) -> None:
@@ -60,7 +59,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
     progress_val = tqdm(enumerate(val_paths), desc=f'Decimation of validation data in folder: {work_dir}',
                           total=len(val_paths))
 
-    scaler = MinMaxScaler(feature_range=(0, 10.))
+    scaler = LogScaler(target_range=(0, 1.))
 
     def decimate_folder(generator, goal):
         cut_label = 0
@@ -89,7 +88,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
                 points = points[classification > cut_label]
                 intensity = intensity[classification > cut_label]
-                intensity = np.log1p(intensity) / np.log1p(intensity.max())
+                intensity = scaler.fit_transform(intensity)
                 
                 classification = classification[classification > cut_label]
                 classification -= 1
