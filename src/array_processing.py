@@ -14,12 +14,13 @@ import torch.nn as nn
 
 
 from final_files.RandLANet_CB import RandLANet
-from utils import load_json, load_model, pcd_manipulation
+from utils import load_json, load_model, pcd_manipulation, LogScaler
 
 class SegmentClass:
     def __init__(self,
                  voxel_size_big: float = 200.,
                  overlap: float = 0.4,
+                 scaled: bool = False,
                  model_name: str = None,
                  config_dir: Union[str, pth.Path] = "final_files",
                  device: torch.device = torch.device('cpu'),
@@ -28,6 +29,7 @@ class SegmentClass:
         self.voxel_size_small = None
         self.voxel_size_big = voxel_size_big
         self.overlap = overlap
+        self.scaled = scaled
         if model_name is None:
             raise ValueError("model_name cannot be None")
         self.model_name = model_name + '.pt'
@@ -39,6 +41,8 @@ class SegmentClass:
         self.verbose = verbose
 
         self._scaler = None
+        if self._scaled is False:
+            self._scaler = self._init_scaler()
         
         self.base_path = pth.Path(__file__).parent
         config_dir = self.base_path.joinpath(config_dir)
@@ -69,8 +73,8 @@ class SegmentClass:
 
         return model
     
-    def _init_scaler(self, feature_range: Tuple[int] = (0, 10)) -> MinMaxScaler:
-        self._scaler = MinMaxScaler(feature_range)
+    def _init_scaler(self, feature_range: Tuple[int] = (0, 1)) -> MinMaxScaler:
+        self._scaler = LogScaler(feature_range)
         return self._scaler
     
     @property
@@ -324,10 +328,12 @@ class SegmentClass:
 
     def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 20*10e6) -> np.ndarray:
 
-        intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
+        if self.scaled:
+            intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
         intensity = intensity.flatten()
 
         points -= points.mean(axis = 0)
+        points = points.astype(np.float32)
 
         num_points = points.shape[0]
         if num_points < fragment_pcd_threshold:
