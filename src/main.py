@@ -38,7 +38,7 @@ def iter_files(**kwargs):
         pbar = path_generator
 
     # Create an instance of SegmentClass
-    segment_class = SegmentClass(voxel_size_big=np.array([100., 100.],), 
+    segment_class = SegmentClass(voxel_size_big=100., 
                                  model_name=model_name,
                                  device=device,
                                  pbar_bool = kwargs.get('verbose'))
@@ -74,7 +74,7 @@ def test(**kwargs):
     # check if Segment Class loads properly:
     segment_class = None
     try:
-        segment_class = SegmentClass(voxel_size_big=np.array([100., 100.]),
+        segment_class = SegmentClass(voxel_size_big=100.,
                                     model_name=kwargs.get('model_name'),
                                     device=device,
                                     pbar_bool=kwargs.get('verbose'))
