@@ -9,6 +9,7 @@ import sys
 import random
 
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 
 import laspy
 import numpy as np
@@ -59,7 +60,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
     progress_val = tqdm(enumerate(val_paths), desc=f'Decimation of validation data in folder: {work_dir}',
                           total=len(val_paths))
 
-    scaler = LogScaler(target_range=(0, 1.))
+    scaler = MinMaxScaler(feature_range=(0, 1.))
 
     def decimate_folder(generator, goal):
         cut_label = 0
@@ -89,6 +90,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                 points = points[classification > cut_label]
                 intensity = intensity[classification > cut_label]
                 intensity = scaler.fit_transform(intensity)
+                intensity = intensity.flatten()
                 
                 classification = classification[classification > cut_label]
                 classification -= 1
