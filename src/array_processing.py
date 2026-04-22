@@ -355,9 +355,14 @@ def test_segm():
     points = np.vstack((las.x, las.y, las.z)).transpose()
     intensity = np.asarray(las.intensity)
 
-    segmenter = SegmentClass(model_name="RandLANetV3_2",
-                             device = torch.device('cuda'),
-                             verbose = True)
+    segmenter = SegmentClass(
+        voxel_size_big=200.,
+        overlap=0.4,
+        model_name="RandLANetV3_2",
+        config_dir="final_files"
+        device = torch.device('cuda'),
+        verbose = True)
+    
     labels = segmenter.segment_pcd(points=points,
                           intensity=intensity)
     
