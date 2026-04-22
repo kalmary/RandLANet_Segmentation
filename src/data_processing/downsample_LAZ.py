@@ -89,7 +89,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
                 points = points[classification > cut_label]
                 intensity = intensity[classification > cut_label]
-                intensity = scaler.fit_transform(intensity)
+                intensity = scaler.fit_transform(intensity.reshape(-1, 1))
                 intensity = intensity.flatten()
                 
                 classification = classification[classification > cut_label]
