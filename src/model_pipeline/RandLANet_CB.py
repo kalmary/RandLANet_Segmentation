@@ -321,7 +321,7 @@ class RandLANet(nn.Module):
         
         with open(config_path, 'r') as f:
             config = json.load(f)
-        
+
         return cls(model_config=config, num_classes=num_classes)
 
     def forward(self, input):
@@ -334,6 +334,7 @@ class RandLANet(nn.Module):
 
         x = self.fc_start(input).transpose(-2,-1).unsqueeze(-1)
         x = self.bn_start(x) # shape (B, d, N, 1)
+        
 
         decimation_ratio = 1
 

@@ -130,6 +130,7 @@ def eval_model_front(config_dict: dict,
     plotter.cnf_matrix(f'cnf_{model_name}.png', all_labels, all_predictions)
 
     miou_report = f'mIoU: {miou}\nIoU per class: {avg_iou_pc}'
+    
     ClassificationReport(file_path=plot_dir.joinpath(f'classification_report_{model_name}.txt'),
                          pred=all_predictions,
                          target=all_labels,
