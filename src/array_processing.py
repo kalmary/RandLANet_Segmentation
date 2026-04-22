@@ -12,9 +12,12 @@ from sklearn.neighbors import KDTree
 import torch
 import torch.nn as nn
 
-
-from final_files.RandLANet_CB import RandLANet
-from utils import load_json, load_model, pcd_manipulation, LogScaler
+try:
+    from .final_files.RandLANet_CB import RandLANet
+    from .utils import load_json, load_model, pcd_manipulation, LogScaler
+except ImportError:
+    from final_files.RandLANet_CB import RandLANet
+    from utils import load_json, load_model, pcd_manipulation, LogScaler
 
 class SegmentClass:
     def __init__(self,
