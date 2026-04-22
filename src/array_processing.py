@@ -359,7 +359,7 @@ def test_segm():
         voxel_size_big=200.,
         overlap=0.4,
         model_name="RandLANetV3_2",
-        config_dir="final_files"
+        config_dir="final_files",
         device = torch.device('cuda'),
         verbose = True)
     
