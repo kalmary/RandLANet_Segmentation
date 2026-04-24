@@ -1,12 +1,12 @@
 import json
 import torch
 from torchinfo import summary
-from model import RandLANet
+from RandLANet_CB import RandLANet
 
 
 def model_info(config_path: str, n_classes: int, device: str = 'cpu'):
     config = json.load(open(config_path))
-    model = RandLANet(config, n_classes=n_classes).to(device)
+    model = RandLANet(model_config=config, n_classes=n_classes).to(device)
     dummy = torch.zeros(6, 16384, config['d_in'], device=device)
     summary(model, input_data=dummy, depth=3, col_names=["num_params", "trainable"])
 
