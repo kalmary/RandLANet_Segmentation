@@ -331,9 +331,9 @@ class SegmentClass:
 
     def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 20*10e6) -> np.ndarray:
 
-        if self.scaled:
-            intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
-        intensity = intensity.flatten()
+        # if self.scaled: # TODO enable it if necessary
+        #     intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
+        # intensity = intensity.flatten()
 
         points -= points.mean(axis = 0)
         points = points.astype(np.float32)
