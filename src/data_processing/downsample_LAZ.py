@@ -60,7 +60,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
     progress_val = tqdm(enumerate(val_paths), desc=f'Decimation of validation data in folder: {work_dir}',
                           total=len(val_paths))
 
-    scaler = MinMaxScaler(feature_range=(0, 1.))
+    scaler = MinMaxScaler(feature_range=(0, 10.))
 
     def decimate_folder(generator, goal):
         cut_label = 0
