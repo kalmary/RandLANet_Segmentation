@@ -225,8 +225,8 @@ class SegmentClass:
                              intensity: np.ndarray):
 
 
-        voxel_all = np.full((points.shape[0], 3), np.nan, dtype = np.float32)
-        voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), np.nan, dtype=np.float32)
+        voxel_all = np.full((points.shape[0], 3), 0.3, dtype = np.float32)
+        voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), 0.3, dtype=np.float32)
 
         checksum = 0
         generator = pcd_manipulation.voxelGridFragmentation(points,
@@ -269,8 +269,8 @@ class SegmentClass:
                 assert voxel_probs.shape[0] == voxel.shape[0]
 
             else:
-                voxel_probs = np.zeros((voxel.shape[0], self._model_config['num_classes']), dtype = np.float32)
-                voxel_probs[:, 0] = 1 # highest prob for class 0
+                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes']), 0.3, dtype = np.float32)
+                # voxel_probs[:, 0] = 1 # highest prob for class 0
 
 
             voxel = voxel0[voxel_idx] # remove redundant points and overwrite centered voxel

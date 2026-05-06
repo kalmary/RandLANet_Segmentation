@@ -162,7 +162,7 @@ class RandLANet(nn.Module):
     def from_config_file(cls, config_path: Union[str, Path], n_classes: int):
         with open(config_path) as f:
             config = json.load(f)
-        return cls(model_config=config, n_classes=n_classes)
+        return cls(model_config=config["model_config"], n_classes=n_classes)
 
     def forward(self, input):
         """
@@ -260,9 +260,10 @@ def test_model():
         "fc_end":   {"layers": [32, 16], "dropout": 0.5}
     }
 
-    B, N, n_classes = 4, 8192, 10
+    B, N, n_classes = 1, 8192, 10
     dummy = torch.randn(B, N, model_config['d_in']).cuda()
-    model = RandLANet(model_config, n_classes=n_classes).cuda()
+    model = RandLANet.from_config_file("src/final_files/RandLANet15.json", n_classes=n_classes).cuda()
+    # model = RandLANet(model_config, n_classes=n_classes).cuda()
 
     out = model(dummy)
     expected = (B, n_classes, N)
