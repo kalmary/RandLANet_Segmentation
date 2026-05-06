@@ -17,6 +17,7 @@ try:
     from .utils import load_json, load_model, pcd_manipulation, LogScaler
 except ImportError:
     from final_files.RandLANet_CB import RandLANet
+    # from final_files.RandLANet15_CB import RandLANet
     from utils import load_json, load_model, pcd_manipulation, LogScaler
 
 class SegmentClass:
@@ -44,14 +45,15 @@ class SegmentClass:
         self.verbose = verbose
 
         self._scaler = None
-        if scaled is False:
-            self._scaler = self._init_scaler()
+        if scaled is True:
+            self._scaler = self._init_scaler(feature_range=(0, 1))
         
         self.base_path = pth.Path(__file__).parent
         config_dir = self.base_path.joinpath(config_dir)
-        self._model_config = self._load_config(config_dir)
+        self._config = None
+        self._model_config = None
+        self._load_config(config_dir)
         self._model = self._load_segmModel(config_dir)
-        self._scaler = self._init_scaler()
 
 
     # TODO adjust model loading 
@@ -59,24 +61,25 @@ class SegmentClass:
 
         config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
         config_dict = load_json(config_path)
+        self._config = config_dict
         self._model_config: dict = config_dict['model_config']
-        self.voxel_size_small: float = self.model_config['max_voxel_dim']
+        self.voxel_size_small: float = self._model_config['max_voxel_dim']
 
         return config_dict
 
     def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
 
         path2model = pth.Path(model_dir).joinpath(self.model_name)
-        model = RandLANet(self._model_config["model_config"], self._model_config['num_classes'])
+        model = RandLANet(self._config["model_config"], self._config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
                                             device=self.device)
         self._model.eval()
     
 
-        return model
+        return self._model
     
-    def _init_scaler(self, feature_range: Tuple[int] = (0, 1)) -> MinMaxScaler:
+    def _init_scaler(self, feature_range: Tuple[int] = (0, 10)) -> MinMaxScaler:
         self._scaler = MinMaxScaler(feature_range)
         return self._scaler
     
@@ -100,7 +103,8 @@ class SegmentClass:
                      tree: KDTree,
                      k_neighbors: int,
                      distance_sigma: float):
-    
+
+
         # Add to output array SHM
         shm_out = shared_memory.SharedMemory(name=shm_info['name'])
         points_probs_view = np.ndarray(
@@ -156,7 +160,10 @@ class SegmentClass:
         try:
             # 1. build kdtree
             # voxel_all is shared as read only in joblib
+            if voxel_all.shape[0] == 0:
+                return np.zeros(points.shape[0], dtype=np.int32)
             tree = KDTree(voxel_all, leaf_size=7)
+            k_neighbors_upsampling = min(k_neighbors_upsampling, voxel_all.shape[0]) 
             
             # 2. Ręczna alokacja macierzy WYJŚCIOWEJ (points_probs) w SHM
             num_points = points.shape[0]
@@ -232,16 +239,16 @@ class SegmentClass:
                              intensity: np.ndarray):
 
 
-        voxel_all = np.full((points.shape[0], 3), np.nan, dtype = np.float32)
-        voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), np.nan, dtype=np.float32)
+        voxel_all = np.full((points.shape[0], 3), 0.0, dtype = np.float32)
+        voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), 0.0, dtype=np.float32)
 
         checksum = 0
         generator = pcd_manipulation.voxelGridFragmentation(points,
                                                             voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
-                                                            num_points = self.model_config['num_points'],
+                                                            num_points = self._config['num_points'],
                                                             overlap_ratio=0.4)
         if self.verbose:
-            pbar0 = tqdm(generator, desc="Points classification", unit=" voxel", leave=False)
+            pbar0 = tqdm(generator, desc="Points classification", unit=" voxel", leave=False, position=1)
         else:
             pbar0 = generator
 
@@ -276,23 +283,21 @@ class SegmentClass:
                 assert voxel_probs.shape[0] == voxel.shape[0]
 
             else:
-                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes']), 0.1, dtype = np.float32)
-                voxel_probs[:, 0] = 0.9 # highest prob for class 0
+                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes']), 0.0, dtype = np.float32)
+                # voxel_probs[:, 0] = 0.9 # highest prob for class 0
 
 
             voxel = voxel0[voxel_idx] # remove redundant points and overwrite centered voxel
             voxel_probs = voxel_probs[voxel_idx]
 
             voxel_all[global_idx] = voxel
-
             voxel_probs_all[global_idx] = voxel_probs
-            voxel_all[global_idx] = voxel
 
-        mask0 = np.isnan(voxel_all).any(axis = 1)
-        mask1 = np.isnan(voxel_probs_all).any(axis=1)
+        # mask0 = np.isnan(voxel_all).any(axis = 1)
+        # mask1 = np.isnan(voxel_probs_all).any(axis=1)
 
-        voxel_all = voxel_all[~mask0]
-        voxel_probs_all = voxel_probs_all[~mask1]
+        # voxel_all = voxel_all[~mask0]
+        # voxel_probs_all = voxel_probs_all[~mask1]
 
         del voxel_probs, voxel, voxel0, voxel_idx
 
@@ -332,6 +337,7 @@ class SegmentClass:
     def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 20*10e6) -> np.ndarray:
 
         if self.scaled: # TODO enable it if necessary
+
             intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
         intensity = intensity.flatten()
 
@@ -348,7 +354,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/home/jakub-szota/Pobrane/10-43_3_nasyp_g.laz"
+    path2laz = "/home/kalmary/Pobrane/10-43_3_nasyp_g_mod.laz"
 
     import laspy
     import pathlib as pth
@@ -361,6 +367,7 @@ def test_segm():
     segmenter = SegmentClass(
         voxel_size_big=200.,
         overlap=0.4,
+        scaled=True,
         model_name="RandLANetV8_2",
         config_dir="final_files",
         device = torch.device('cuda'),
@@ -369,8 +376,8 @@ def test_segm():
     labels = segmenter.segment_pcd(points=points,
                           intensity=intensity)
     
-    las.classification = labels
-    las.write(path2laz.stem + "_mod.laz")
+    from utils import plot_cloud
+    plot_cloud(points, labels)
 
 
 
