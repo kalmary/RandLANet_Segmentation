@@ -77,7 +77,7 @@ class SegmentClass:
         return model
     
     def _init_scaler(self, feature_range: Tuple[int] = (0, 1)) -> MinMaxScaler:
-        self._scaler = LogScaler(feature_range)
+        self._scaler = MinMaxScaler(feature_range)
         return self._scaler
     
     @property
