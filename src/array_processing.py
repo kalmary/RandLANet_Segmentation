@@ -44,7 +44,7 @@ class SegmentClass:
         self.verbose = verbose
 
         self._scaler = None
-        if self._scaled is False:
+        if scaled is False:
             self._scaler = self._init_scaler()
         
         self.base_path = pth.Path(__file__).parent
@@ -276,7 +276,7 @@ class SegmentClass:
                 assert voxel_probs.shape[0] == voxel.shape[0]
 
             else:
-                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes'], 0.1), dtype = np.float32)
+                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes']), 0.1, dtype = np.float32)
                 voxel_probs[:, 0] = 0.9 # highest prob for class 0
 
 
@@ -348,7 +348,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/mnt/fcadda7e-cec7-4f07-b005-1d1719df93e7/BRIK/BRIK_DATA_PROCESS/testing/09-05_small.laz"
+    path2laz = "/home/jakub-szota/Pobrane/10-43_3_nasyp_g.laz"
 
     import laspy
     import pathlib as pth
@@ -361,7 +361,7 @@ def test_segm():
     segmenter = SegmentClass(
         voxel_size_big=200.,
         overlap=0.4,
-        model_name="RandLANetV3_2",
+        model_name="RandLANetV8_2",
         config_dir="final_files",
         device = torch.device('cuda'),
         verbose = True)
