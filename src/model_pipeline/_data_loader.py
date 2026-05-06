@@ -30,8 +30,6 @@ class Dataset(IterableDataset):
                  num_points: int = 4096,
                  batch_size: int = 1,
                  shuffle: bool = True,
-                 weights: Optional[torch.Tensor] = None,
-                 oversample_power: float = 1.5,
                  device: Optional[torch.device] = torch.device('cpu')):
 
         super(Dataset).__init__()
@@ -43,14 +41,6 @@ class Dataset(IterableDataset):
         self.num_points = num_points
         self.batch_size = batch_size
         self.shuffle = shuffle
-
-        # Process weights for sampling if provided
-        if weights is not None and oversample_power != 1.0:
-            sampling_weights = torch.pow(weights, oversample_power)
-            sampling_weights = sampling_weights / sampling_weights.sum()
-            self.sampling_weights = sampling_weights
-        else:
-            self.sampling_weights = weights
 
     def _key_streamer(self):
         with h5py.File(self.path, 'r') as h_file:
@@ -135,3 +125,12 @@ class Dataset(IterableDataset):
                 batch_labels_tensor = batch_labels_tensor[idx]
 
             yield batch_data_tensor, batch_labels_tensor
+
+def test():
+    path = '/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/converted/validation.h5'
+    dataset = Dataset(path, mode=0, num_points=8192, batch_size=1, shuffle=False)
+    for i, (data, labels) in enumerate(dataset):
+        data_avg = data.squeeze(0)
+        print(data_avg.min(axis = 0).values, data_avg.max(axis = 0).values)
+if __name__ == '__main__':
+    test()
