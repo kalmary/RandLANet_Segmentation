@@ -17,7 +17,6 @@ try:
     from .utils import load_json, load_model, pcd_manipulation, LogScaler
 except ImportError:
     from final_files.RandLANet_CB import RandLANet
-    # from final_files.RandLANet15_CB import RandLANet
     from utils import load_json, load_model, pcd_manipulation, LogScaler
 
 class SegmentClass:
