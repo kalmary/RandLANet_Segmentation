@@ -14,10 +14,10 @@ import torch.nn as nn
 
 try:
     from .final_files.RandLANet_CB import RandLANet
-    from .utils import load_json, load_model, pcd_manipulation, LogScaler
+    from .utils import load_json, load_model, pcd_manipulation
 except ImportError:
     from final_files.RandLANet_CB import RandLANet
-    from utils import load_json, load_model, pcd_manipulation, LogScaler
+    from utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
     def __init__(self,
