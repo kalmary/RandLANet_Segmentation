@@ -14,11 +14,14 @@ import torch.nn as nn
 
 try:
     from .final_files.RandLANet_CB import RandLANet
-    from .utils import load_json, load_model, pcd_manipulation, LogScaler
+    from .utils import load_json, load_model, pcd_manipulation
 except ImportError:
-    from final_files.RandLANet_CB import RandLANet
-    # from final_files.RandLANet15_CB import RandLANet
-    from utils import load_json, load_model, pcd_manipulation, LogScaler
+    try:
+        from final_files.RandLANet_CB import RandLANet
+        from utils import load_json, load_model, pcd_manipulation
+    except ImportError:
+        from PCDSegmentation.src.final_files.RandLANet_CB import RandLANet
+        from PCDSegmentation.src.utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
     def __init__(self,
@@ -354,7 +357,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/home/kalmary/Pobrane/10-43_3_nasyp_g_mod.laz"
+    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal.laz"
 
     import laspy
     import pathlib as pth
