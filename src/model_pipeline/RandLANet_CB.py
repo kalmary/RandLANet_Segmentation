@@ -7,10 +7,7 @@ import sys
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-try:
-    from ..utils import KNNCache
-except ImportError:
-    from utils import KNNCache
+from utils import KNNCache
 
 import json
 from pathlib import Path

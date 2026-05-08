@@ -167,7 +167,7 @@ cython_debug/
 
 **/logs/
 **/training_results/
-**/final_files/
+# **/final_files/
 **/db.sqlite3
 
 *.xlsx#
