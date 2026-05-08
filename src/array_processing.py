@@ -344,7 +344,7 @@ class SegmentClass:
             intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
         intensity = intensity.flatten()
 
-        points -= points.mean(axis = 0)
+        points = points - points.mean(axis = 0)
         points = points.astype(np.float32)
 
         num_points = points.shape[0]
@@ -357,7 +357,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal.laz"
+    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
 
     import laspy
     import pathlib as pth

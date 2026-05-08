@@ -1,0 +1,87 @@
+{
+    "train_repeat": 1,
+    "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
+    "data_path_train": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/distributed/train.h5",
+    "data_path_test": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/distributed/test.h5",
+    "data_path_val": "/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/distributed/validation.h5",
+    "num_classes": 10,
+    "batch_size": 6,
+    "num_points": 8192,
+    "num_neighbors": 32,
+    "epochs": 75,
+    "focal_loss_gamma": 1.5,
+    "general_convention_comment": "start, stop, step",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "learning_rate_comment": "low_lr, high_lr, factor",
+    "scheduler_params_comment": [],
+    "pc_start": 0.2,
+    "pc_start_comment": "start, stop, step",
+    "div_factor": 16,
+    "div_factor_comment": "low, high, factor",
+    "final_div_factor": 5969,
+    "final_div_factor_comment": "low, high, factor",
+    "device": "cuda",
+    "model": null,
+    "model_config": {
+        "d_in": 4,
+        "num_neighbors": 32,
+        "decimation": 4,
+        "encoder_layers": [
+            {
+                "d_in": 8,
+                "d_out": 32
+            },
+            {
+                "d_in": 64,
+                "d_out": 128
+            },
+            {
+                "d_in": 256,
+                "d_out": 256
+            },
+            {
+                "d_in": 512,
+                "d_out": 512
+            },
+            {
+                "d_in": 1024,
+                "d_out": 1024
+            }
+        ],
+        "decoder_layers": [
+            {
+                "d_in": 4096,
+                "d_out": 1024
+            },
+            {
+                "d_in": 2048,
+                "d_out": 512
+            },
+            {
+                "d_in": 1024,
+                "d_out": 256
+            },
+            {
+                "d_in": 512,
+                "d_out": 128
+            },
+            {
+                "d_in": 192,
+                "d_out": 8
+            }
+        ],
+        "fc_start": {
+            "d_out": 8
+        },
+        "fc_end": {
+            "layers": [
+                32,
+                16
+            ],
+            "dropout": 0.5
+        },
+        "max_voxel_dim": 20,
+        "num_classes": 10
+    }
+}
