@@ -4,6 +4,7 @@ from multiprocessing import shared_memory
 import pathlib as pth
 import os
 import sys
+import gc
 from tqdm import tqdm
 
 import numpy as np
@@ -77,6 +78,7 @@ class SegmentClass:
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
                                             device=self.device)
+        self._model.to(self.device)
         self._model.eval()
     
 
@@ -229,6 +231,7 @@ class SegmentClass:
     
     def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
 
+
         voxel = torch.from_numpy(voxel).float().to(self.device)
         voxel = voxel.unsqueeze(dim = 0)
         with torch.no_grad():
@@ -316,7 +319,7 @@ class SegmentClass:
     
         voxel_all, voxel_probs_all = self._segment_voxel_base(points, intensity)
         labels = self._upsample_labeled_chunk_parallel(voxel_all, voxel_probs_all, points)
-
+        del voxel_all, voxel_probs_all
         return labels
     
 
@@ -329,7 +332,7 @@ class SegmentClass:
         else:
             pbar = None
 
-        for indices in pcd_manipulation.voxelGridFragmentation(data=points,
+        for indices, _ in pcd_manipulation.voxelGridFragmentation(data=points,
                                                                num_points=0,
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
@@ -348,13 +351,16 @@ class SegmentClass:
 
             labels_chunk = self._segment_small_voxel(points_chunk, intensity_chunk)
             labels[indices] = labels_chunk
+            
+            del points_chunk, intensity_chunk, labels_chunk
+            gc.collect()
         
         if pbar is not None:
             pbar.close()
 
         return labels
 
-    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 10e6) -> np.ndarray:
+    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 7e6) -> np.ndarray:
 
         if self.scaled: # TODO enable it if necessary
 
