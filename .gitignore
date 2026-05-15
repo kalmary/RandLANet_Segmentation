@@ -173,5 +173,7 @@ cython_debug/
 *.xlsx#
 *.pdf
 *.xlsx
+*.pt
+
 
 
