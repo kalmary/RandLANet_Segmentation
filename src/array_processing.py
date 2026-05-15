@@ -101,133 +101,72 @@ class SegmentClass:
         return self._scaler
     
     @staticmethod
-    def _worker_task(chunk_data: Tuple[int, int],
-                     voxel_probs_all: np.ndarray,
-                     points: np.ndarray,
-                     shm_info: Dict[str, Any], # Nowy argument
-                     tree: KDTree,
-                     k_neighbors: int,
-                     distance_sigma: float):
-
-
-        # Add to output array SHM
+    def _worker_task(chunk_data, voxel_probs_all, points, shm_info, tree, k_neighbors, distance_sigma):
         shm_out = shared_memory.SharedMemory(name=shm_info['name'])
-        points_probs_view = np.ndarray(
-            shm_info['shape'], 
-            dtype=shm_info['dtype'], 
-            buffer=shm_out.buf
-        )
-        
-        start_idx, end_idx = chunk_data
-        points_chunk = points[start_idx:end_idx] 
-
-        # kd tree (shared) query
-        dists, indices = tree.query(points_chunk, k=k_neighbors) 
-        
-        for local_i in range(points_chunk.shape[0]):
-            global_i = start_idx + local_i
-            
-            neighbor_probs = voxel_probs_all[indices[local_i]]
-            neighbor_dists = dists[local_i]
-
-            weights = np.exp(- (neighbor_dists ** 2) / (2 * distance_sigma ** 2))
-            weights_sum = weights.sum()
-
-            if weights_sum > 0:
-                weights /= weights_sum
-                points_probs_view[global_i] = np.sum(neighbor_probs * weights[:, np.newaxis], axis=0)
-            else:
-                points_probs_view[global_i] = 0.0
-            
-        # Close local reference to SHM
-        shm_out.close()
-        
-        return None
-
-    def _upsample_labeled_chunk_parallel(self, 
-                                        voxel_all: np.array,
-                                        voxel_probs_all: np.array,
-                                        points: np.array,
-                                        k_neighbors_upsampling: int = 14,
-                                        distance_sigma: float = 0.35,
-                                        num_workers: int = -1,
-                                        verbose: Optional[bool] = False) -> np.array:
-        
-        shm_points_probs: Optional[shared_memory.SharedMemory] = None
-        
-        available_workers = os.cpu_count()
-        if num_workers == -1 or num_workers == 0 or available_workers < num_workers:
-            num_workers = available_workers
-        else:
-            num_workers = available_workers
-
-        
         try:
-            # 1. build kdtree
-            # voxel_all is shared as read only in joblib
-            if voxel_all.shape[0] == 0:
-                return np.zeros(points.shape[0], dtype=np.int32)
-            tree = KDTree(voxel_all, leaf_size=7)
-            k_neighbors_upsampling = min(k_neighbors_upsampling, voxel_all.shape[0]) 
-            
-            # 2. Ręczna alokacja macierzy WYJŚCIOWEJ (points_probs) w SHM
-            num_points = points.shape[0]
-            num_classes = voxel_probs_all.shape[1]
-            points_probs_shape = (num_points, num_classes)
-            points_probs_dtype = np.float32
-            
-            size_points_probs = np.dtype(points_probs_dtype).itemsize * num_points * num_classes
-            
-            shm_points_probs = shared_memory.SharedMemory(create=True, size=size_points_probs)
-            shared_points_probs_view = np.ndarray(points_probs_shape, dtype=points_probs_dtype, buffer=shm_points_probs.buf)
-            shared_points_probs_view[:] = 0 # start with 0s
-            
-            # input array metadata
-            shm_info_out = {
-                'name': shm_points_probs.name,
-                'shape': points_probs_shape,
-                'dtype': points_probs_dtype
-            }
-            
-            # 3. work division 
-            num_workers = os.cpu_count()
-            chunk_size = num_points // num_workers
-            chunk_data_list: List[Tuple[int, int]] = []
-            
-            for i in range(num_workers):
-                start_idx = i * chunk_size
-                end_idx = (i + 1) * chunk_size if i < num_workers - 1 else num_points
-                if start_idx < end_idx:
-                    chunk_data_list.append((start_idx, end_idx))
-        
+            points_probs_view = np.ndarray(shm_info['shape'], dtype=shm_info['dtype'], buffer=shm_out.buf)
+            start_idx, end_idx = chunk_data
+            points_chunk = points[start_idx:end_idx]
 
-            task_iterator = (
+            dists, indices = tree.query(points_chunk, k=k_neighbors)
+
+            for local_i in range(points_chunk.shape[0]):
+                global_i = start_idx + local_i
+                neighbor_probs = voxel_probs_all[indices[local_i]]
+                neighbor_dists = dists[local_i]
+                weights = np.exp(-(neighbor_dists ** 2) / (2 * distance_sigma ** 2))
+                weights_sum = weights.sum()
+                if weights_sum > 0:
+                    weights /= weights_sum
+                    points_probs_view[global_i] = np.sum(neighbor_probs * weights[:, np.newaxis], axis=0)
+                else:
+                    points_probs_view[global_i] = 0.0
+        finally:
+            shm_out.close()  # always close, never unlink from worker
+
+
+    def _upsample_labeled_chunk_parallel(self, voxel_all, voxel_probs_all, points,
+                                        k_neighbors_upsampling=14, distance_sigma=0.35,
+                                        num_workers=-1, verbose=False):
+        if voxel_all.shape[0] == 0:
+            return np.zeros(points.shape[0], dtype=np.int32)
+
+        n_workers = os.cpu_count() if num_workers <= 0 else min(num_workers, os.cpu_count())
+
+        tree = KDTree(voxel_all, leaf_size=7)
+        k_neighbors_upsampling = min(k_neighbors_upsampling, voxel_all.shape[0])
+
+        num_points = points.shape[0]
+        num_classes = voxel_probs_all.shape[1]
+        dtype = np.float32
+        size = np.dtype(dtype).itemsize * num_points * num_classes
+
+        shm = shared_memory.SharedMemory(create=True, size=size)
+        try:
+            view = np.ndarray((num_points, num_classes), dtype=dtype, buffer=shm.buf)
+            view[:] = 0
+
+            shm_info = {'name': shm.name, 'shape': (num_points, num_classes), 'dtype': dtype}
+
+            chunk_size = max(1, num_points // n_workers)
+            chunks = [
+                (i * chunk_size, min((i + 1) * chunk_size, num_points))
+                for i in range(n_workers)
+                if i * chunk_size < num_points
+            ]
+
+            Parallel(n_jobs=n_workers, prefer='processes')(
                 delayed(self._worker_task)(
-                    chunk,
-                    voxel_probs_all,
-                    points,
-                    shm_info_out, 
-                    tree,
-                    k_neighbors_upsampling,
-                    distance_sigma
+                    chunk, voxel_probs_all, points, shm_info, tree, k_neighbors_upsampling, distance_sigma
                 )
-                for chunk in chunk_data_list
+                for chunk in chunks
             )
 
-            Parallel(n_jobs=num_workers, prefer='processes')(task_iterator)
-            
-            points_labels = np.argmax(shared_points_probs_view, axis=1)
-            return points_labels.flatten()
-
+            # Parallel is synchronous — all workers done here, safe to read
+            return np.argmax(view, axis=1).flatten()
         finally:
-            if shm_points_probs is not None:
-                try:
-                    shm_points_probs.close()
-                    import time
-                    time.sleep(0.1)  # Give workers time to finish cleanup
-                    shm_points_probs.unlink()
-                except FileNotFoundError:
-                    pass
+            shm.close()
+            shm.unlink()  # only the owner unlinks, after Parallel returns
     
     def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
 
