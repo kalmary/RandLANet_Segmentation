@@ -155,7 +155,7 @@ class SegmentClass:
                 if i * chunk_size < num_points
             ]
 
-            Parallel(n_jobs=n_workers, prefer='processes')(
+            Parallel(n_jobs=n_workers, backend='multiprocessing')(
                 delayed(self._worker_task)(
                     chunk, voxel_probs_all, points, shm_info, tree, k_neighbors_upsampling, distance_sigma
                 )
