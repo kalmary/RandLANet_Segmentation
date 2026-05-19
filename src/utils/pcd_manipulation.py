@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import fpsample
 import random
+from tqdm import tqdm
 
 def add_gaussian_noise(cloud: torch.Tensor, std: float=0.01):
     noise = torch.randn_like(cloud) * std
@@ -149,7 +150,8 @@ def voxelGridFragmentation(data,
                            voxel_size: np.array = np.array([25., 25.]),
                            num_points = 0,
                            overlap_ratio: float = 0.4,
-                           shuffle: bool = False):
+                           shuffle: bool = False,
+                           verbose: bool = True):
     
     """
     Voxel grid fragmentation of a point cloud.
@@ -180,9 +182,14 @@ def voxelGridFragmentation(data,
         random.shuffle(y_range)
 
     voxel_coords = [(x, y) for x in x_range for y in y_range]
+    if verbose:
+        pbar = tqdm(total=len(voxel_coords), desc="Segmenting big voxel", unit=" point", leave=False, position=1)
+    else:
+        pbar = voxel_coords
+        
 
     # Precompute all voxel bounding boxes
-    for (x, y) in voxel_coords:
+    for (x, y) in pbar:
         lower = np.array([x, y])
         upper = lower + voxel_size
 

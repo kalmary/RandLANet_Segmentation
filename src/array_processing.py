@@ -282,23 +282,15 @@ class SegmentClass:
 
     def _segment_big_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
         labels = np.zeros(intensity.shape, dtype=np.int32)
-        
-        if self.verbose:
-            pbar = tqdm(total=points.shape[0], desc="Segmenting big voxel", unit=" point", leave=False, position=1)
-        else:
-            pbar = None
 
         for indices, _ in pcd_manipulation.voxelGridFragmentation(data=points,
                                                                num_points=0,
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
-                                                               shuffle=False):
+                                                               shuffle=False,
+                                                               verbose=self.verbose):
             if indices.shape[0] == 0:
                 continue
-
-            if pbar is not None:
-                pbar.update(indices.shape[0])
-                pbar.set_postfix({"Number of processed points": pbar.n})
 
             points_chunk = points[indices]
             points_chunk -= points_chunk.mean(axis = 0)
@@ -310,9 +302,6 @@ class SegmentClass:
             
             del points_chunk, intensity_chunk, labels_chunk
             gc.collect()
-        
-        if pbar is not None:
-            pbar.close()
 
         return labels
 
