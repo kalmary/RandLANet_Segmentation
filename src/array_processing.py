@@ -204,13 +204,15 @@ class SegmentClass:
         voxel_all = np.full((points.shape[0], 3), 0.0, dtype = np.float32)
         voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), 0.0, dtype=np.float32)
 
-        checksum = 0
         generator = pcd_manipulation.voxelGridFragmentation(points,
                                                             voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
                                                             num_points = self._config['num_points'],
-                                                            overlap_ratio=0.4)
+                                                            overlap_ratio=0.4,
+                                                            verbose=self.verbose,
+                                                            desc="Segmenting small voxels",
+                                                            position=2)
         if self.verbose:
-            pbar0 = tqdm(generator, desc="Points classification", unit=" voxel", leave=False, position=2)
+            pbar0 = tqdm(generator, desc="Small voxel classification", unit=" voxel", leave=False, position=2)
         else:
             pbar0 = generator
 
@@ -230,11 +232,6 @@ class SegmentClass:
             global_idx = np.sort(global_idx)
 
             voxel_idx = np.sort(voxel_idx)
-
-            checksum += voxel_idx.shape[0]
-            if self.verbose:
-                pbar0.update(1)
-                pbar0.set_postfix({"Number of processed points": checksum})
 
             voxel = np.concatenate([voxel, intensity_voxel.reshape(-1, 1)], axis = 1)
 
@@ -274,6 +271,7 @@ class SegmentClass:
     def _segment_small_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
     
         voxel_all, voxel_probs_all = self._segment_voxel_base(points, intensity)
+
         labels = self._upsample_labeled_chunk_parallel(voxel_all, voxel_probs_all, points)
         del voxel_all, voxel_probs_all
         return labels
@@ -288,7 +286,9 @@ class SegmentClass:
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
                                                                shuffle=False,
-                                                               verbose=self.verbose):
+                                                               verbose=self.verbose,
+                                                               desc="Big voxel segmentation",
+                                                               position=1):
             if indices.shape[0] == 0:
                 continue
 
