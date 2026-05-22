@@ -138,6 +138,8 @@ class SegmentClass:
     def _upsample_labeled_chunk_parallel(self, voxel_all, voxel_probs_all, points,
                                         k_neighbors_upsampling=14, distance_sigma=0.35,
                                         num_workers=-1, verbose=False):
+        if points.shape[0] == 0:
+            return np.zeros(0, dtype=np.int32)
         if voxel_all.shape[0] == 0:
             return np.zeros(points.shape[0], dtype=np.int32)
 
@@ -203,6 +205,7 @@ class SegmentClass:
 
         voxel_all = np.full((points.shape[0], 3), 0.0, dtype = np.float32)
         voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), 0.0, dtype=np.float32)
+        filled_mask = np.zeros(points.shape[0], dtype=bool)
 
         generator = pcd_manipulation.voxelGridFragmentation(points,
                                                             voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
@@ -251,6 +254,7 @@ class SegmentClass:
 
             voxel_all[global_idx] = voxel
             voxel_probs_all[global_idx] = voxel_probs
+            filled_mask[global_idx] = True
         
         try:
             pbar0.close()
@@ -263,9 +267,7 @@ class SegmentClass:
         # voxel_all = voxel_all[~mask0]
         # voxel_probs_all = voxel_probs_all[~mask1]
 
-        del voxel_probs, voxel, voxel0, voxel_idx
-
-        return voxel_all, voxel_probs_all
+        return voxel_all[filled_mask], voxel_probs_all[filled_mask]
     
 
     def _segment_small_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
@@ -306,10 +308,16 @@ class SegmentClass:
         return labels
 
     def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 7e6) -> np.ndarray:
+        if points.shape[0] == 0:
+            return np.zeros(0, dtype=np.int32)
+        if points.shape[0] != intensity.shape[0]:
+            raise ValueError(
+                f"points and intensity length mismatch: {points.shape[0]} != {intensity.shape[0]}"
+            )
 
         if self.scaled: # TODO enable it if necessary
 
-            intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
+            intensity = self._scaler.fit_transform(intensity.reshape(-1, 1))
         intensity = intensity.flatten()
 
         points = points - points.mean(axis = 0)

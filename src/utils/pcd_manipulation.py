@@ -173,12 +173,17 @@ def voxelGridFragmentation(data,
     
     """
 
+    if data.shape[0] == 0:
+        return
+
     min_xyz = data.min(axis=0)
     max_xyz = data.max(axis=0)
     stride = voxel_size * (1 - overlap_ratio)
+    if np.any(stride <= 0):
+        raise ValueError("voxel_size * (1 - overlap_ratio) must be positive")
 
-    x_range = np.arange(min_xyz[0], max_xyz[0], stride[0])
-    y_range = np.arange(min_xyz[1], max_xyz[1], stride[1])
+    x_range = np.arange(min_xyz[0], max_xyz[0] + stride[0], stride[0])
+    y_range = np.arange(min_xyz[1], max_xyz[1] + stride[1], stride[1])
 
     if shuffle:
         random.shuffle(x_range)
