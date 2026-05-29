@@ -214,12 +214,8 @@ class SegmentClass:
                                                             verbose=self.verbose,
                                                             desc="Segmenting small voxels",
                                                             position=2)
-        if self.verbose:
-            pbar0 = tqdm(generator, desc="Small voxel classification", unit=" voxel", leave=False, position=2)
-        else:
-            pbar0 = generator
 
-        for (voxel_idx, noise) in pbar0:
+        for (voxel_idx, noise) in generator:
 
             if voxel_idx.shape[0] == 0:
                 continue
