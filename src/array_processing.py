@@ -226,11 +226,11 @@ class SegmentClass:
             voxel -= voxel.mean(axis= 0)
 
             intensity_voxel = intensity[voxel_idx]
-
-            global_idx, voxel_idx = np.unique(voxel_idx, return_index=True) # global - unique z points, voxel - unique z voxel
-            global_idx = np.sort(global_idx)
-
-            voxel_idx = np.sort(voxel_idx)
+            
+            global_idx, voxel_idx = np.unique(voxel_idx, return_index=True)
+            order = np.argsort(global_idx)
+            global_idx = global_idx[order]
+            voxel_idx = voxel_idx[order]
 
             voxel = np.concatenate([voxel, intensity_voxel.reshape(-1, 1)], axis = 1)
 
