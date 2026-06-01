@@ -251,11 +251,6 @@ class SegmentClass:
             voxel_all[global_idx] = voxel
             voxel_probs_all[global_idx] = voxel_probs
             filled_mask[global_idx] = True
-        
-        try:
-            pbar0.close()
-        except Exception:
-            pass
 
         # mask0 = np.isnan(voxel_all).any(axis = 1)
         # mask1 = np.isnan(voxel_probs_all).any(axis=1)
