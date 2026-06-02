@@ -203,8 +203,9 @@ class SegmentClass:
                              intensity: np.ndarray):
 
 
+        num_classes = self._model_config['num_classes']
         voxel_all = np.full((points.shape[0], 3), 0.0, dtype = np.float32)
-        voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), 0.0, dtype=np.float32)
+        voxel_probs_all = np.full((points.shape[0], num_classes + 1), 0.0, dtype=np.float32)
         filled_mask = np.zeros(points.shape[0], dtype=bool)
 
         generator = pcd_manipulation.voxelGridFragmentation(points,
@@ -241,7 +242,7 @@ class SegmentClass:
                 assert voxel_probs.shape[0] == voxel.shape[0]
 
             else:
-                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes']), 0.0, dtype = np.float32)
+                voxel_probs = np.full((voxel.shape[0], num_classes), 0.0, dtype = np.float32)
                 # voxel_probs[:, 0] = 0.9 # highest prob for class 0
 
 
@@ -249,7 +250,8 @@ class SegmentClass:
             voxel_probs = voxel_probs[voxel_idx]
 
             voxel_all[global_idx] = voxel
-            voxel_probs_all[global_idx] = voxel_probs
+            voxel_probs_all[global_idx, :num_classes] += voxel_probs
+            voxel_probs_all[global_idx, num_classes] += 1
             filled_mask[global_idx] = True
 
         # mask0 = np.isnan(voxel_all).any(axis = 1)
@@ -258,7 +260,10 @@ class SegmentClass:
         # voxel_all = voxel_all[~mask0]
         # voxel_probs_all = voxel_probs_all[~mask1]
 
-        return voxel_all[filled_mask], voxel_probs_all[filled_mask]
+        voxel_probs_all = voxel_probs_all[filled_mask]
+        voxel_probs_all[:, :num_classes] /= voxel_probs_all[:, num_classes].reshape(-1, 1)
+
+        return voxel_all[filled_mask], voxel_probs_all[:, :num_classes]
     
 
     def _segment_small_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
