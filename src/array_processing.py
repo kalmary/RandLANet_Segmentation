@@ -250,8 +250,10 @@ class SegmentClass:
             voxel_probs = voxel_probs[voxel_idx]
 
             voxel_all[global_idx] = voxel
+            
             voxel_probs_all[global_idx, :num_classes] += voxel_probs
             voxel_probs_all[global_idx, num_classes] += 1
+
             filled_mask[global_idx] = True
 
         # mask0 = np.isnan(voxel_all).any(axis = 1)
@@ -312,7 +314,6 @@ class SegmentClass:
             )
 
         if self.scaled: # TODO enable it if necessary
-
             intensity = self._scaler.fit_transform(intensity.reshape(-1, 1))
         intensity = intensity.flatten()
 
