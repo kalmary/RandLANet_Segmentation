@@ -5,7 +5,7 @@ import pathlib as pth
 
 
 def single_file():
-    laz = laspy.read("/mnt/SSD_EXT4_1TB/DATA/GRAJEWO_MINI_TEST/ITWL_Grajewo20_mini_mod.laz")
+    laz = laspy.read("/Users/michalsiniarski/Documents/DATA/BRIK/ITWL_Grajewo21_mod.laz")
     points = np.vstack((laz.x, laz.y, laz.z)).T
     feature = laz.classification
     
@@ -30,6 +30,8 @@ def mutliple_files():
             
         laz = laspy.read(file)
         points = np.vstack((laz.x, laz.y, laz.z)).T
+        points -= points.mean(axis=0)
+        
         feature = laz.classification
         
         print(f"Plotting {file.stem}, semantic classification")
