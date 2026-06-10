@@ -114,7 +114,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
 
                     for i, (sampled_idx, noise) in enumerate(voxelGridFragmentation(points_chunk_0,
-                                                                                    voxel_size=np.array([20., 20.]), #TODO check if it works, update in other places
+                                                                                    voxel_size=np.array([20., 20., 20.]), #TODO check if it works, update in other places
                                                                                     overlap_ratio=0.25,
                                                                                     num_points=2*8192,
                                                                                     shuffle=True)):

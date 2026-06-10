@@ -148,7 +148,7 @@ def transform_points(
 
 
 def voxelGridFragmentation(data,
-                           voxel_size: np.array = np.array([25., 25.]),
+                           voxel_size: np.array = np.array([20., 20., 20.]),
                            num_points = 0,
                            overlap_ratio: float = 0.4,
                            shuffle: bool = False,
@@ -184,12 +184,19 @@ def voxelGridFragmentation(data,
 
     x_range = np.arange(min_xyz[0], max_xyz[0] + stride[0], stride[0])
     y_range = np.arange(min_xyz[1], max_xyz[1] + stride[1], stride[1])
+    if voxel_size.shape[0] == 3:
+        z_range = np.arange(min_xyz[2], max_xyz[2] + stride[2], stride[2])
 
     if shuffle:
         random.shuffle(x_range)
         random.shuffle(y_range)
+        if voxel_size.shape[0] == 3:
+            random.shuffle(z_range)
 
-    voxel_coords = [(x, y) for x in x_range for y in y_range]
+    if voxel_size.shape[0] == 3:
+        voxel_coords = [(x, y, z) for x in x_range for y in y_range for z in z_range]
+    else:
+        voxel_coords = [(x, y) for x in x_range for y in y_range]
     if verbose:
         pbar = tqdm(voxel_coords, total=len(voxel_coords), desc=desc, unit=" voxel", leave=False, position=position)
     else:
@@ -197,11 +204,17 @@ def voxelGridFragmentation(data,
         
 
     # Precompute all voxel bounding boxes
-    for (x, y) in pbar:
-        lower = np.array([x, y])
-        upper = lower + voxel_size
+    for coords in pbar:
+        if voxel_size.shape[0] == 3:
+            x, y, z = coords
+            lower = np.array([x, y, z])
+        else:
+            x, y = coords
+            lower = np.array([x, y])
 
-        mask = np.all((data[:, :2] >= lower) & (data[:, :2] <= upper), axis=1)
+        upper = lower + voxel_size
+        mask = np.all((data[:, :voxel_size.shape[0]] >= lower) & (data[:, :voxel_size.shape[0]] <= upper), axis=1)
+
         indices = np.where(mask)[0]
 
         sampled_idx = indices
