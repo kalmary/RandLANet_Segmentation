@@ -209,9 +209,9 @@ class SegmentClass:
         filled_mask = np.zeros(points.shape[0], dtype=bool)
 
         generator = pcd_manipulation.voxelGridFragmentation(points,
-                                                            voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
+                                                            voxel_size = np.array([self.voxel_size_small, self.voxel_size_small, self.voxel_size_small]),
                                                             num_points = self._config['num_points'],
-                                                            overlap_ratio=0.4,
+                                                            overlap_ratio=0.3,
                                                             verbose=self.verbose,
                                                             desc="Segmenting small voxels",
                                                             position=2)
