@@ -78,22 +78,23 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                     continue
 
                 points = np.vstack((las.x, las.y, las.z)).transpose()
-                points = points.astype(np.float64)
+                points = points.astype(np.float32, copy=False)
 
                 points = points - np.mean(points, axis =0)
 
 
-                classification = np.asarray(las.classification, dtype=np.int32)
+                classification = np.asarray(las.classification, dtype=np.uint8)
                 intensity = np.asarray(las.intensity, dtype=np.float32)
                 
 
-                points = points[classification > cut_label]
-                intensity = intensity[classification > cut_label]
+                valid_mask = classification > cut_label
+                points = points[valid_mask]
+                intensity = intensity[valid_mask]
                 intensity = scaler.fit_transform(intensity.reshape(-1, 1))
-                intensity = intensity.flatten()
+                intensity = intensity.flatten().astype(np.float32, copy=False)
                 
-                classification = classification[classification > cut_label]
-                classification -= 1
+                classification = classification[valid_mask]
+                classification = (classification - 1).astype(np.uint8, copy=False)
 
                 for i_0, (sampled_idx_0, noise_0) in enumerate(voxelGridFragmentation(points,
                                                                                       voxel_size=np.array([200., 200.]),
@@ -129,10 +130,10 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                         if np.unique(classification_chunk).flatten().shape[0] < 3: # TODO a way to avoid imbalance of dataset with huge number of ground points.
                             continue
 
-                        chunk = np.concatenate([points_chunk,
+                        chunk = np.concatenate([points_chunk.astype(np.float32, copy=False),
                                                 intensity_chunk.reshape(-1, 1),
                                                 classification_chunk.reshape(-1, 1)],
-                                                axis = 1)
+                                                axis = 1).astype(np.float32, copy=False)
                         
                         n_org = points_chunk.shape[0]
                         chunk_num += 1
@@ -187,7 +188,7 @@ def convert_dataset(work_dir: pth.Path, goal_dir: pth.Path) -> tuple[pth.Path, p
                 goal_file = goal_dir.joinpath('validation.h5')
                 h5_file = h5py.File(goal_file, 'w')
         
-        chunk2save = np.zeros((0, chunk_num_point, 5))
+        chunk2save = np.zeros((0, chunk_num_point, 5), dtype=np.float32)
         chunk_num = 0
 
         for path in tqdm(path_list, desc=f'Training folder, copying data {pth.Path(path_list[0]).parent} ---> {goal_file.name}',
@@ -199,7 +200,7 @@ def convert_dataset(work_dir: pth.Path, goal_dir: pth.Path) -> tuple[pth.Path, p
             chunk2save = np.concatenate([chunk2save, points], axis=0)
             if chunk2save.shape[0] >= chunk_h5_shape:
                 h5_file.create_dataset(str(chunk_num), data=chunk2save)
-                chunk2save = np.zeros((0, chunk_num_point, 5))
+                chunk2save = np.zeros((0, chunk_num_point, 5), dtype=np.float32)
                 chunk_num += 1
 
         if chunk2save.shape[0] > 0:
