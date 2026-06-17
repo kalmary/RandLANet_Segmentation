@@ -11,7 +11,7 @@ def _tree_species(laz):
 
 
 def single_file():
-    laz = laspy.read("/Users/michalsiniarski/Documents/DATA/BRIK/GRAJEWO-TEST/07-45.laz")
+    laz = laspy.read("/Users/michalsiniarski/Documents/DATA/BRIK/GRAJEWO-TEST/ITWL_Grajewo20_1_mod.laz")
     points = np.vstack((laz.x, laz.y, laz.z)).T
     feature = laz.classification
     
