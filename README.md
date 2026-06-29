@@ -66,6 +66,12 @@ Clone the repository to your local machine:
 git clone https://github.com/kalmary/RandLANet_Segmentation.git
 
 cd RandLANet_Segmentation
+
+git pull
+git submodule update --init --recursive
+
+git submodule foreach --recursive git checkout main
+git submodule foreach --recursive git pull origin main
 ```
 
 Create and activate a Virtual Environment and install requirements:
