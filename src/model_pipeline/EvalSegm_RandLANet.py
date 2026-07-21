@@ -10,7 +10,7 @@ import pathlib as pth
 
 
 
-from RandLANet_CB import RandLANet
+from RandLANet_CB_pooled import RandLANet
 from _data_loader import *
 
 import os
@@ -233,7 +233,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
 
 

@@ -1,7 +1,7 @@
 import json
 import torch
 from torchinfo import summary
-from RandLANet_CB import RandLANet
+from RandLANet_CB_pooled import RandLANet
 
 
 def model_info(config_path: str, n_classes: int, device: str = 'cpu'):

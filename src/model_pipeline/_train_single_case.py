@@ -8,7 +8,7 @@ from utils import EarlyStopping
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
-from RandLANet_CB import RandLANet
+from RandLANet_CB_pooled import RandLANet
 
 from _data_loader import *
 

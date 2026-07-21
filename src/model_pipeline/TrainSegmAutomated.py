@@ -29,7 +29,7 @@ from _train_single_case import train_model
 from utils import load_json, save2json, save_model, convert_str_values
 from utils import Plotter
 
-from RandLANet_CB import RandLANet
+from RandLANet_CB_pooled import RandLANet
 
 
 def check_models(model_configs_paths: list[pth.Path],
