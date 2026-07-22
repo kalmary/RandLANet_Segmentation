@@ -1,9 +1,9 @@
 {
     "train_repeat": 3,
     "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
-    "data_path_train": "/media/jakub-szota/Dane_2/LAS/Convered/train.h5",
-    "data_path_test": "/media/jakub-szota/Dane_2/LAS/Convered/test.h5",
-    "data_path_val": "/media/jakub-szota/Dane_2/LAS/Convered/validation.h5",
+    "data_path_train": "/mnt/data-ssd/DALES/dataset_1/train.h5",
+    "data_path_test": "/mnt/data-ssd/DALES/dataset_1/test.h5",
+    "data_path_val": "/mnt/data-ssd/DALES/dataset_1/validation.h5",
     "num_classes": 10,
     "batch_size": [
         6,
