@@ -7,11 +7,9 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 
 import torch.multiprocessing as mp
-from _data_loader import CustomDataset
+from _data_loader import make_loader
 
 from RandLANet_CB import RandLANet
-
-from _data_loader import *
 
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
@@ -31,30 +29,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
     device_loader = device_gpu
     device_loss = device_gpu
 
-    train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
-                                      num_points=training_dict['num_points'],
-                                      batch_size=training_dict['batch_size'],
-                                      buffer_size=150,
-                                      shuffle=True)
-
-    trainLoader = DataLoader(train_dataset,
-                             batch_size=None,
-                             num_workers = 7,
-                             pin_memory=True)
-    
-
-
-
-    val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
-                                    num_points=training_dict['num_points'],
-                                    batch_size=training_dict['batch_size'],
-                                    buffer_size=150,
-                                    shuffle=False)
-
-    valLoader = DataLoader(val_dataset,
-                             batch_size=None,
-                             num_workers = 7,
-                             pin_memory=True)
     try:
 
         class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
@@ -68,36 +42,28 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         )
 
 
-        train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
-                    num_points=training_dict['num_points'],
-                    batch_size=training_dict['batch_size'],
-                    buffer_size=150,
-                    shuffle=True,
-                    pos_weights=class_weights_t.numpy(),
-                    epoch=0)
+        trainLoader, _ = make_loader(
+            data_dir=training_dict['data_path_train'],
+            num_points=training_dict['num_points'],
+            batch_size=training_dict['batch_size'],
+            query_workers=training_dict.get('query_workers', 7),
+            shuffle=True,
+            pos_weights=class_weights_t.numpy(),
+            max_seen=training_dict.get('max_seen', 10),
+        )
 
-        trainLoader = DataLoader(train_dataset,
-                                batch_size=None,
-                                num_workers = 7,
-                                pin_memory=True)
-
-
-        val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
-                                        num_points=training_dict['num_points'],
-                                        batch_size=training_dict['batch_size'],
-                                        buffer_size=150,
-                                        shuffle=False,
-                                        pos_weights=class_weights_v.numpy(),
-                                        epoch=0)
-
-        valLoader = DataLoader(val_dataset,
-                                batch_size=None,
-                                num_workers = 7,
-                                pin_memory=True)
+        valLoader, _ = make_loader(
+            data_dir=training_dict['data_path_val'],
+            num_points=training_dict['num_points'],
+            batch_size=training_dict['batch_size'],
+            query_workers=training_dict.get('query_workers', 7),
+            shuffle=False,
+            pos_weights=class_weights_v.numpy(),
+            max_seen=training_dict.get('max_seen', 10),
+        )
 
         total_t = get_dataset_len(trainLoader)
         total_v = get_dataset_len(valLoader)
-
 
         if training_dict['model'] is None:
             model = RandLANet(model_config=training_dict['model_config'],
@@ -141,7 +107,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         scheduler = OneCycleLR(
             optimizer,
             max_lr=training_dict['learning_rate'],  # Example: Adjust based on your LR range test
-            total_steps=total_t*training_dict['epochs'],
+            total_steps=total_t*training_dict['epochs']*training_dict['train_repeat'],
             pct_start=training_dict['pc_start'],  # % of steps for warm-up
             anneal_strategy='cos',  # Cosine annealing
             div_factor=training_dict['div_factor'],  # Initial LR will be max_lr / x
@@ -161,7 +127,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         repeat_pbar = tqdm(range(training_dict['train_repeat']), 
                             desc="Training Repetition", 
                             unit="repeat",
-                            position=1, 
+                            position=1,
                             leave=False) 
 
         for _ in repeat_pbar:
@@ -173,38 +139,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                 leave=False) 
 
             for epoch in epoch_pbar:
-
-                train_dataset = CustomDataset(data_dir=training_dict['data_path_train'],
-                                    num_points=training_dict['num_points'],
-                                    batch_size=training_dict['batch_size'],
-                                    buffer_size=150,
-                                    shuffle=True,
-                                    pos_weights=class_weights_t.numpy(),
-                                    epoch=epoch)
-
-                trainLoader = DataLoader(train_dataset,
-                                        batch_size=None,
-                                        num_workers = 7,
-                                        pin_memory=True)
-                
-
-
-
-                val_dataset = CustomDataset(data_dir=training_dict['data_path_val'],
-                                                num_points=training_dict['num_points'],
-                                                batch_size=training_dict['batch_size'],
-                                                buffer_size=150,
-                                                shuffle=False,
-                                                pos_weights=class_weights_v.numpy(),
-                                                epoch=epoch)
-
-                valLoader = DataLoader(val_dataset,
-                                        batch_size=None,
-                                        num_workers = 7,
-                                        pin_memory=True)
-
-
-
 
                 epoch_loss_t = 0.
                 epoch_loss_v = 0.
@@ -239,10 +173,8 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                     loss_t.backward()
                     optimizer.step()
 
-                    try:
+                    if scheduler.last_epoch < scheduler.total_steps:
                         scheduler.step()
-                    except Exception:
-                        pass
 
                     # accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
 
@@ -266,8 +198,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 miou_hist.append(-1.)  # Not computed for training
 
                 progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", 
-                                     total=total_v,
-                                    position=3, leave=False)
+                                    position=3, total = total_v, leave=False)
                 model.eval()
 
                 with torch.no_grad():

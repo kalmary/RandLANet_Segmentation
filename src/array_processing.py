@@ -1,364 +1,373 @@
-from typing import Union, Optional, Any, Tuple, Dict, List
-from joblib import Parallel, delayed
-from multiprocessing import shared_memory
-import pathlib as pth
-import os
-import sys
-from tqdm import tqdm
+from pathlib import Path
+from typing import Union
 
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.neighbors import KDTree
 import torch
 import torch.nn as nn
+from scipy.spatial import cKDTree
+from tqdm import tqdm
 
+try:
+    from .data_processing.downsample_LAZ import voxel_subsample_vectorized
+    from .model_pipeline.RandLANet_CB import RandLANet
+    from .utils import load_json, load_model
+except ImportError:
+    from data_processing.downsample_LAZ import voxel_subsample_vectorized
+    from model_pipeline.RandLANet_CB import RandLANet
+    from utils import load_json, load_model
 
-from model_pipeline.RandLANet_CB import RandLANet
-from utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
-    def __init__(self,
-                 voxel_size_big: float = 200.,
-                 overlap: float = 0.4,
-                 model_name: str = None,
-                 config_dir: Union[str, pth.Path] = "final_files",
-                 device: torch.device = torch.device('cpu'),
-                 pbar_bool: bool = False):
-        
-        self.voxel_size_small = None
-        self.voxel_size_big = voxel_size_big
-        self.overlap = overlap
-        if model_name is None:
-            raise ValueError("model_name cannot be None")
-        self.model_name = model_name + '.pt'
+    def __init__(
+        self,
+        model_name: str,
+        config_dir: Union[str, Path] = "final_files",
+        device: Union[str, torch.device] = torch.device("cpu"),
+        voxel_size: float = 0.10,
+        tile_size: float = 40.0,
+        overlap: float = 5.0,
+        n_seen: int = 10,
+        query_workers: int = -1,
+        pbar_bool: bool = False,
+    ):
+        if not model_name:
+            raise ValueError("model_name cannot be empty")
+        if voxel_size <= 0:
+            raise ValueError("voxel_size must be positive")
+        if tile_size <= 0:
+            raise ValueError("tile_size must be positive")
+        if overlap < 0:
+            raise ValueError("overlap cannot be negative")
+        if not 1 <= n_seen <= np.iinfo(np.int8).max:
+            raise ValueError("n_seen must fit in int8")
+        if query_workers == 0 or query_workers < -1:
+            raise ValueError("query_workers must be -1 or a positive integer")
 
-        if isinstance(device, str):
-            self.device = torch.device(device)
-        self.device = device
-
+        self.model_name = model_name.removesuffix(".pt")
+        self.device = torch.device(device)
+        self.voxel_size = float(voxel_size)
+        self.tile_size = float(tile_size)
+        self.overlap = float(overlap)
+        self.n_seen = int(n_seen)
+        self.query_workers = int(query_workers)
         self.pbar_bool = pbar_bool
+        self._rng = np.random.default_rng()
 
-        self._scaler = None
-        
-        self.base_path = pth.Path(__file__).parent
-        config_dir = self.base_path.joinpath(config_dir)
-        self._model_config = self._load_config(config_dir)
-        self._model = self._load_segmModel(config_dir)
-        self._scaler = self._init_scaler()
+        base_path = Path(__file__).parent
+        config_dir = Path(config_dir)
+        if not config_dir.is_absolute():
+            config_dir = base_path / config_dir
 
+        self._config = self._load_config(config_dir)
+        self._model_config = self._config["model_config"]
+        self.num_points = int(self._config["num_points"])
+        self.batch_size = int(self._config["batch_size"])
+        self.n_classes = int(self._config["num_classes"])
 
-    # TODO adjust model loading 
-    def _load_config(self, config_dir: Optional[Union[pth.Path, str]] = None) -> dict:
+        if self.n_classes > np.iinfo(np.int8).max + 1:
+            raise ValueError("n_classes must fit in int8 labels")
 
-        config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
-        config_dict = load_json(config_path)
-        self._model_config: dict = config_dict['model_config']
-        self.voxel_size_small: float = self.model_config['max_voxel_dim']
+        overlaps_per_axis = int(
+            np.ceil((self.tile_size + 2 * self.overlap) / self.tile_size)
+        )
+        self.max_overlaps = overlaps_per_axis ** 2
+        if self.max_overlaps > np.iinfo(np.int8).max:
+            raise ValueError("tile overlap count must fit in int8")
 
-        return config_dict
+        self._model = self._load_model(config_dir)
 
-    def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
+    def _load_config(self, config_dir: Path) -> dict:
+        config_path = config_dir / f"{self.model_name}_config.json"
+        return load_json(config_path)
 
-        path2model = pth.Path(model_dir).joinpath(self.model_name)
-        model = RandLANet(self._model_config["model_config"], self._model_config['num_classes'])
-        self._model: nn.Module = load_model(file_path=path2model,
-                                            model=model,
-                                            device=self.device)
-        self._model.eval()
-    
-
+    def _load_model(self, model_dir: Path) -> nn.Module:
+        model = RandLANet(
+            model_config=self._model_config,
+            n_classes=self.n_classes,
+        )
+        model = load_model(
+            file_path=model_dir / f"{self.model_name}.pt",
+            model=model,
+            device=self.device,
+        )
+        model.eval()
         return model
-    
-    def _init_scaler(self, feature_range: Tuple[int] = (0, 10)) -> MinMaxScaler:
-        self._scaler = MinMaxScaler(feature_range)
-        return self._scaler
-    
+
     @property
     def model_config(self) -> dict:
         return self._model_config
-    
+
     @property
     def model(self) -> nn.Module:
         return self._model
-    
-    @property
-    def scaler(self) -> MinMaxScaler:
-        return self._scaler
-    
-    @staticmethod
-    def _worker_task(chunk_data: Tuple[int, int],
-                     voxel_probs_all: np.ndarray,
-                     points: np.ndarray,
-                     shm_info: Dict[str, Any], # Nowy argument
-                     tree: KDTree,
-                     k_neighbors: int,
-                     distance_sigma: float):
-    
-        # Add to output array SHM
-        shm_out = shared_memory.SharedMemory(name=shm_info['name'])
-        points_probs_view = np.ndarray(
-            shm_info['shape'], 
-            dtype=shm_info['dtype'], 
-            buffer=shm_out.buf
+
+    def _model_predict(self, batch: np.ndarray) -> np.ndarray:
+        inputs = torch.from_numpy(batch).to(self.device)
+        with torch.no_grad():
+            outputs = self._model(inputs)
+            probabilities = torch.softmax(outputs, dim=1)
+        return probabilities.movedim(1, -1).cpu().numpy()
+
+    def _query_neighbors(
+        self,
+        tree: cKDTree,
+        points: np.ndarray,
+        center_indices: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        neighbor_count = min(self.num_points, len(points))
+        _, queried = tree.query(
+            points[center_indices],
+            k=neighbor_count,
+            workers=self.query_workers,
         )
-        
-        start_idx, end_idx = chunk_data
-        points_chunk = points[start_idx:end_idx] 
+        queried = np.asarray(queried, dtype=np.int64)
+        if neighbor_count == 1:
+            queried = queried.reshape(-1, 1)
+        elif queried.ndim == 1:
+            queried = queried[None, :]
 
-        # kd tree (shared) query
-        dists, indices = tree.query(points_chunk, k=k_neighbors) 
-        
-        for local_i in range(points_chunk.shape[0]):
-            global_i = start_idx + local_i
-            
-            neighbor_probs = voxel_probs_all[indices[local_i]]
-            neighbor_dists = dists[local_i]
+        neighbors = np.empty_like(queried)
+        neighbors[:, 0] = center_indices
+        for row, center_idx in enumerate(center_indices):
+            other = queried[row][queried[row] != center_idx]
+            neighbors[row, 1:] = other[:neighbor_count - 1]
 
-            weights = np.exp(- (neighbor_dists ** 2) / (2 * distance_sigma ** 2))
-            weights_sum = weights.sum()
+        if neighbor_count == self.num_points:
+            return neighbors, neighbors
 
-            if weights_sum > 0:
-                weights /= weights_sum
-                points_probs_view[global_i] = np.sum(neighbor_probs * weights[:, np.newaxis], axis=0)
-            else:
-                points_probs_view[global_i] = 0.0
-            
-        # Close local reference to SHM
-        shm_out.close()
-        
-        return None
+        repeats = int(np.ceil(self.num_points / neighbor_count))
+        model_neighbors = np.tile(neighbors, (1, repeats))[:, :self.num_points]
+        return neighbors, model_neighbors
 
-    def _upsample_labeled_chunk_parallel(self, 
-                                        voxel_all: np.array,
-                                        voxel_probs_all: np.array,
-                                        points: np.array,
-                                        k_neighbors_upsampling: int = 14,
-                                        distance_sigma: float = 0.35,
-                                        num_workers: int = -1,
-                                        pbar: bool = None) -> np.array:
-        
-        shm_points_probs: Optional[shared_memory.SharedMemory] = None
-        
-        available_workers = os.cpu_count()
-        if num_workers == -1 or num_workers == 0 or available_workers < num_workers:
-            num_workers = available_workers
-        else:
-            num_workers = available_workers
+    @staticmethod
+    def _add_predictions(
+        probabilities: np.ndarray,
+        seen: np.ndarray,
+        neighbor_indices: np.ndarray,
+        neighbor_probabilities: np.ndarray,
+    ) -> None:
+        indices, increments = np.unique(
+            neighbor_indices.reshape(-1),
+            return_counts=True,
+        )
+        new_seen = seen[indices, 0].astype(np.int16) + increments
 
-        
-        try:
-            # 1. build kdtree
-            # voxel_all is shared as read only in joblib
-            tree = KDTree(voxel_all, leaf_size=7)
-            
-            # 2. Ręczna alokacja macierzy WYJŚCIOWEJ (points_probs) w SHM
-            num_points = points.shape[0]
-            num_classes = voxel_probs_all.shape[1]
-            points_probs_shape = (num_points, num_classes)
-            points_probs_dtype = np.float32
-            
-            size_points_probs = np.dtype(points_probs_dtype).itemsize * num_points * num_classes
-            
-            shm_points_probs = shared_memory.SharedMemory(create=True, size=size_points_probs)
-            shared_points_probs_view = np.ndarray(points_probs_shape, dtype=points_probs_dtype, buffer=shm_points_probs.buf)
-            shared_points_probs_view[:] = 0 # start with 0s
-            
-            # input array metadata
-            shm_info_out = {
-                'name': shm_points_probs.name,
-                'shape': points_probs_shape,
-                'dtype': points_probs_dtype
-            }
-            
-            # 3. work division 
-            num_workers = os.cpu_count()
-            chunk_size = num_points // num_workers
-            chunk_data_list: List[Tuple[int, int]] = []
-            
-            for i in range(num_workers):
-                start_idx = i * chunk_size
-                end_idx = (i + 1) * chunk_size if i < num_workers - 1 else num_points
-                if start_idx < end_idx:
-                    chunk_data_list.append((start_idx, end_idx))
-        
+        np.add.at(
+            probabilities,
+            neighbor_indices.reshape(-1),
+            neighbor_probabilities.reshape(-1, probabilities.shape[1]),
+        )
+        seen[indices, 0] = np.minimum(
+            new_seen,
+            np.iinfo(np.int8).max,
+        ).astype(np.int8)
 
-            task_iterator = (
-                delayed(self._worker_task)(
-                    chunk,
-                    voxel_probs_all,
-                    points,
-                    shm_info_out, 
-                    tree,
-                    k_neighbors_upsampling,
-                    distance_sigma
-                )
-                for chunk in chunk_data_list
+    def _segment_part(
+        self,
+        points: np.ndarray,
+        intensity: np.ndarray,
+    ) -> np.ndarray:
+        tree = cKDTree(points, leafsize=40)
+        seen = np.zeros((len(points), 1), dtype=np.int8)
+        probabilities = np.zeros(
+            (len(points), self.n_classes),
+            dtype=np.float32,
+        )
+
+        while True:
+            remaining = np.flatnonzero(seen[:, 0] < self.n_seen)
+            if remaining.size == 0:
+                break
+
+            center_count = min(self.batch_size, remaining.size)
+            center_indices = self._rng.choice(
+                remaining,
+                size=center_count,
+                replace=False,
+            )
+            neighbors, model_neighbors = self._query_neighbors(
+                tree,
+                points,
+                center_indices,
             )
 
-            Parallel(n_jobs=num_workers, prefer='processes')(task_iterator)
-            
-            points_labels = np.argmax(shared_points_probs_view, axis=1)
-            return points_labels.flatten()
+            centers = points[center_indices, None, :]
+            batch_xyz = points[model_neighbors] - centers
+            batch_intensity = intensity[model_neighbors, None]
+            batch = np.concatenate((batch_xyz, batch_intensity), axis=2)
+            batch_probabilities = self._model_predict(batch)
+            expected_shape = (
+                center_count,
+                self.num_points,
+                self.n_classes,
+            )
+            if batch_probabilities.shape != expected_shape:
+                raise ValueError(
+                    f"Expected model probabilities {expected_shape}, "
+                    f"got {batch_probabilities.shape}"
+                )
 
-        finally:
-            if shm_points_probs is not None:
-                try:
-                    shm_points_probs.close()
-                    import time
-                    time.sleep(0.1)  # Give workers time to finish cleanup
-                    shm_points_probs.unlink()
-                except FileNotFoundError:
-                    pass
-    
-    def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
+            self._add_predictions(
+                probabilities,
+                seen,
+                neighbors,
+                batch_probabilities[:, :neighbors.shape[1]],
+            )
 
-        voxel = torch.from_numpy(voxel).float().to(self.device)
-        voxel = voxel.unsqueeze(dim = 0)
-        with torch.no_grad():
-            voxel_probs = self._model(voxel)
-        voxel_probs = voxel_probs.permute(0, 2, 1).squeeze(dim = 0).cpu().numpy()
+        probabilities /= seen.astype(np.float32)
+        return np.argmax(probabilities, axis=1).astype(np.int8)
 
-        return voxel_probs
+    def _tile_starts(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        minimum = points[:, :2].min(axis=0)
+        maximum = points[:, :2].max(axis=0)
+        x_starts = np.arange(minimum[0], maximum[0], self.tile_size)
+        y_starts = np.arange(minimum[1], maximum[1], self.tile_size)
+        if x_starts.size == 0:
+            x_starts = minimum[0:1]
+        if y_starts.size == 0:
+            y_starts = minimum[1:2]
+        return x_starts, y_starts
 
-    def _segment_voxel_base(self,
-                             points: np.ndarray,
-                             intensity: np.ndarray):
-
-
-        voxel_all = np.full((points.shape[0], 3), 0.3, dtype = np.float32)
-        voxel_probs_all = np.full((points.shape[0], self._model_config['num_classes']), 0.3, dtype=np.float32)
-
-        checksum = 0
-        generator = pcd_manipulation.voxelGridFragmentation(points,
-                                                            voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
-                                                            num_points = self.model_config['num_points'],
-                                                            overlap_ratio=0.4)
-        if self.pbar_bool:
-            pbar0 = tqdm(generator, desc="Points classification", unit=" voxel", leave=False)
-        else:
-            pbar0 = generator
-
-        for (voxel_idx, noise) in pbar0:
-
-            if voxel_idx.shape[0] == 0:
-                continue
-
-            voxel = points[voxel_idx]
-            voxel0 = voxel.copy()
-
-            voxel -= voxel.mean(axis= 0)
-
-            intensity_voxel = intensity[voxel_idx]
-
-            global_idx, voxel_idx = np.unique(voxel_idx, return_index=True) # global - unique z points, voxel - unique z voxel
-            global_idx = np.sort(global_idx)
-
-            voxel_idx = np.sort(voxel_idx)
-
-            checksum += voxel_idx.shape[0]
-            if self.pbar_bool:
-                pbar0.update(1)
-                pbar0.set_postfix({"Number of processed points": checksum})
-
-            voxel = np.concatenate([voxel, intensity_voxel.reshape(-1, 1)], axis = 1)
-
-            if not noise:
-
-                voxel_probs = self._model_predict(voxel)
-
-                assert voxel_probs.shape[0] == voxel.shape[0]
-
+    def _iter_parts(self, points: np.ndarray):
+        x_starts, y_starts = self._tile_starts(points)
+        for x_index, x_start in enumerate(x_starts):
+            x_end = x_start + self.tile_size + self.overlap
+            x_mask = points[:, 0] >= x_start - self.overlap
+            if x_index == len(x_starts) - 1:
+                x_mask &= points[:, 0] <= x_end
             else:
-                voxel_probs = np.full((voxel.shape[0], self._model_config['num_classes']), 0.3, dtype = np.float32)
-                # voxel_probs[:, 0] = 1 # highest prob for class 0
+                x_mask &= points[:, 0] < x_end
 
+            for y_index, y_start in enumerate(y_starts):
+                y_end = y_start + self.tile_size + self.overlap
+                mask = x_mask & (points[:, 1] >= y_start - self.overlap)
+                if y_index == len(y_starts) - 1:
+                    mask &= points[:, 1] <= y_end
+                else:
+                    mask &= points[:, 1] < y_end
 
-            voxel = voxel0[voxel_idx] # remove redundant points and overwrite centered voxel
-            voxel_probs = voxel_probs[voxel_idx]
+                indices = np.flatnonzero(mask)
+                if indices.size:
+                    yield indices
 
-            voxel_all[global_idx] = voxel
+    @staticmethod
+    def _hard_vote(votes: np.ndarray) -> np.ndarray:
+        labels = np.full(len(votes), -1, dtype=np.int8)
+        best_counts = np.zeros(len(votes), dtype=np.int8)
 
-            voxel_probs_all[global_idx] = voxel_probs
-            voxel_all[global_idx] = voxel
+        for column in range(votes.shape[1]):
+            candidate = votes[:, column]
+            valid = candidate >= 0
+            candidate_counts = np.zeros(len(votes), dtype=np.int8)
+            for other_column in range(votes.shape[1]):
+                candidate_counts += (
+                    valid & (votes[:, other_column] == candidate)
+                ).astype(np.int8)
 
-        mask0 = np.isnan(voxel_all).any(axis = 1)
-        mask1 = np.isnan(voxel_probs_all).any(axis=1)
+            replace = valid & (candidate_counts > best_counts)
+            labels[replace] = candidate[replace]
+            best_counts[replace] = candidate_counts[replace]
 
-        voxel_all = voxel_all[~mask0]
-        voxel_probs_all = voxel_probs_all[~mask1]
-
-        del voxel_probs, voxel, voxel0, voxel_idx
-
-        return voxel_all, voxel_probs_all
-    
-
-    def _segment_small_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
-    
-        voxel_all, voxel_probs_all = self._segment_voxel_base(points, intensity)
-        labels = self._upsample_labeled_chunk_parallel(voxel_all, voxel_probs_all, points)
-
-        return labels
-    
-
-
-    def _segment_big_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
-        labels = np.zeros(intensity.shape, dtype=np.int32)
-
-        for indices in pcd_manipulation.voxelGridFragmentation(data=points,
-                                                               num_points=0,
-                                                               voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
-                                                               overlap_ratio=0,
-                                                               shuffle=False):
-            if indices.shape[0] == 0:
-                continue
-
-            points_chunk = points[indices]
-            points_chunk -= points_chunk.mean(axis = 0)
-
-            intensity_chunk = intensity[indices]
-
-            labels_chunk = self._segment_small_voxel(points_chunk, intensity_chunk)
-            labels[indices] = labels_chunk
-
+        if np.any(labels < 0):
+            raise RuntimeError("at least one point has no tile prediction")
         return labels
 
-    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 20*10e6) -> np.ndarray:
+    def _segment_subsampled(
+        self,
+        points: np.ndarray,
+        intensity: np.ndarray,
+    ) -> np.ndarray:
+        votes = np.full(
+            (len(points), self.max_overlaps),
+            -1,
+            dtype=np.int8,
+        )
+        vote_counts = np.zeros(len(points), dtype=np.int8)
+        parts = self._iter_parts(points)
+        if self.pbar_bool:
+            parts = tqdm(parts, desc="Cloud parts", unit="part", leave=False)
 
-        intensity = self._scaler.fit_transform(intensity.reshape(1, -1))
-        intensity = intensity.flatten()
+        for indices in parts:
+            part_labels = self._segment_part(
+                points[indices],
+                intensity[indices],
+            )
+            positions = vote_counts[indices]
+            if np.any(positions >= self.max_overlaps):
+                raise RuntimeError("point belongs to more tiles than expected")
+            votes[indices, positions] = part_labels
+            vote_counts[indices] += 1
 
-        points -= points.mean(axis = 0)
+        return self._hard_vote(votes)
 
-        num_points = points.shape[0]
-        if num_points < fragment_pcd_threshold:
-            labels = self._segment_small_voxel(points, intensity)
+    def _upsample_labels(
+        self,
+        subsampled_points: np.ndarray,
+        subsampled_labels: np.ndarray,
+        points: np.ndarray,
+    ) -> np.ndarray:
+        tree = cKDTree(subsampled_points, leafsize=40)
+        labels = np.empty(len(points), dtype=np.int8)
+        chunk_size = 1_000_000
+
+        starts = range(0, len(points), chunk_size)
+        if self.pbar_bool:
+            starts = tqdm(starts, desc="Label upsampling", unit="chunk", leave=False)
+
+        for start in starts:
+            end = min(start + chunk_size, len(points))
+            _, indices = tree.query(
+                points[start:end],
+                k=1,
+                workers=self.query_workers,
+            )
+            labels[start:end] = subsampled_labels[indices]
+        return labels
+
+    def segment_pcd(
+        self,
+        points: np.ndarray,
+        intensity: np.ndarray,
+    ) -> np.ndarray:
+        points = np.asarray(points)
+        intensity = np.asarray(intensity).reshape(-1)
+        if points.ndim != 2 or points.shape[1] != 3:
+            raise ValueError(f"Expected points with shape (N, 3), got {points.shape}")
+        if len(points) == 0:
+            raise ValueError("point cloud cannot be empty")
+        if len(intensity) != len(points):
+            raise ValueError("points and intensity must have the same length")
+        if np.any(intensity < 0):
+            raise ValueError("intensity cannot contain negative values")
+
+        normalized_points = points.astype(np.float64, copy=True)
+        normalized_points -= normalized_points.mean(axis=0)
+        normalized_points = normalized_points.astype(np.float32)
+
+        normalized_intensity = intensity.astype(np.float32, copy=True)
+        maximum_intensity = normalized_intensity.max()
+        if maximum_intensity > 0:
+            normalized_intensity = (
+                np.log1p(normalized_intensity) / np.log1p(maximum_intensity)
+            )
         else:
-            labels = self._segment_big_voxel(points, intensity)
+            normalized_intensity.fill(0)
 
-        return labels
+        source_indices = np.arange(len(points), dtype=np.int64)
+        subsampled_points, subsampled_features, _ = voxel_subsample_vectorized(
+            normalized_points,
+            normalized_intensity[:, None],
+            source_indices,
+            self.voxel_size,
+        )
+        subsampled_intensity = subsampled_features[:, 0]
 
-        
-def test_segm():
-    path2laz = "/home/michal-siniarski/Dokumenty/Z32/LAS/TREE_SEGM/automatically_segmented_data/O1W.laz"
-
-    import laspy
-    import pathlib as pth
-
-    path2laz = pth.Path(path2laz)
-    las = laspy.read(path2laz)
-    points = np.vstack((las.x, las.y, las.z)).transpose()
-    intensity = np.asarray(las.intensity)
-
-    segmenter = SegmentClass(model_name="RandLANetV3_2",
-                             device = torch.device('cuda'),
-                             pbar_bool = True)
-    labels = segmenter.segment_pcd(points=points,
-                          intensity=intensity)
-
-
-
-
-if __name__ == '__main__':
-    test_segm()
-
-
+        subsampled_labels = self._segment_subsampled(
+            subsampled_points,
+            subsampled_intensity,
+        )
+        return self._upsample_labels(
+            subsampled_points,
+            subsampled_labels,
+            normalized_points,
+        )

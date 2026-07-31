@@ -1,100 +1,96 @@
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.utils.data import DataLoader
-from torchinfo import summary
 
 import argparse
 from tqdm import tqdm
 import pathlib as pth
-
-
-
-from RandLANet_CB import RandLANet
-from _data_loader import *
-
-import os
 import sys
 
-src_dir = pth.Path(__file__).parent.parent
+
+model_pipeline_dir = pth.Path(__file__).parent
+src_dir = model_pipeline_dir.parent
+sys.path.append(str(model_pipeline_dir))
 sys.path.append(str(src_dir))
 
+from RandLANet_CB import RandLANet
+from _data_loader import make_loader
+
 from utils import load_json, load_model, convert_str_values
-from utils import get_dataset_len, calculate_class_weights, calculate_weighted_accuracy, compute_mIoU, FocalLoss_ArcFace, get_intLabels, get_Probabilities
+from utils import calculate_accuracy, calculate_weighted_accuracy, compute_mIoU
+from utils import compute_pos_weights, FocalLoss_ArcFace, get_intLabels, get_Probabilities
 from utils import Plotter, ClassificationReport
 
 
 def _eval_model(config_dict: dict,
-                model: nn.Module) -> tuple[list, list, np.ndarray, np.ndarray, np.ndarray]:
-    device_gpu = torch.device('cuda')
-    device_cpu = torch.device('cpu')
+                model: nn.Module) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    class_weights = compute_pos_weights(
+        data_dir=config_dict['data_path_test'],
+        num_classes=config_dict['num_classes'],
+        power=0.5,
+    )
+    test_loader, _ = make_loader(
+        data_dir=config_dict['data_path_test'],
+        num_points=config_dict['num_points'],
+        batch_size=config_dict['batch_size'],
+        query_workers=config_dict.get('query_workers', 7),
+        shuffle=False,
+        pos_weights=class_weights.numpy(),
+        max_seen=config_dict.get('max_seen', 10),
+    )
 
-    device_loader = device_gpu
-    device_loss = device_cpu
-    
-    test_dataset = Dataset(base_dir=config_dict['data_path_test'],
-                                    num_points=config_dict['num_points'],
-                                    batch_size=config_dict['batch_size'],
-                                    shuffle=False,
-                                    device=device_loader)
+    output_batches = []
+    label_batches = []
 
-    testLoader = DataLoader(test_dataset,
-                             batch_size=None,
-                             num_workers = 14,
-                             pin_memory=False)
-
-    total = get_dataset_len(testLoader, verbose=False)
-    weights = calculate_class_weights(testLoader, 
-                                      config_dict['num_classes'], 
-                                      total=total, 
-                                      device=device_loader,
-                                      verbose=False)
-    weights = weights.to(device_loss)
-    
-    criterion = FocalLoss_ArcFace(alpha=weights.to(device_loss),
-                                gamma=config_dict['focal_loss_gamma']).to(device_loss)
-
-    loss_per_epoch = 0.
-    accuracy_per_epoch = 0.0
-    epoch_samples = 0
-
-    all_predictions = []
-    all_probs = np.zeros((0, config_dict['num_classes']))
-    all_labels = []
-
-    pbar = tqdm(testLoader, total=total, desc="Testing", unit="batch")
+    model.eval()
+    pbar = tqdm(test_loader, desc="Testing", unit="batch")
     with torch.no_grad():
         for batch_x, batch_y in pbar:
+            outputs = model(batch_x.to(config_dict['device']))
+            output_batches.append(outputs.cpu())
+            label_batches.append(batch_y.cpu())
 
-            model.eval()
-            batch_x = batch_x.to(config_dict['device'])
+    if not output_batches:
+        raise RuntimeError("Test loader produced no batches")
 
-
-            outputs = model(batch_x)
-            outputs = outputs.to(device_loss)
-            batch_y = batch_y.to(device_loss)
-
-            loss = criterion(outputs, batch_y)
-            
-            loss_per_epoch += loss.item()*batch_y.size(0)
-
-            epoch_samples += batch_y.size(0)
-
-            total_loss = loss_per_epoch / epoch_samples
+    return (
+        torch.cat(output_batches, dim=0),
+        torch.cat(label_batches, dim=0),
+        class_weights,
+    )
 
 
-            all_labels.extend(batch_y.cpu().tolist())
+def calculate_metrics(outputs: torch.Tensor,
+                      labels: torch.Tensor,
+                      class_weights: torch.Tensor,
+                      num_classes: int,
+                      focal_loss_gamma: float) -> dict:
+    criterion = FocalLoss_ArcFace(
+        alpha=class_weights,
+        gamma=focal_loss_gamma,
+    )
+    loss = criterion(outputs, labels).item()
+    accuracy = calculate_accuracy(outputs, labels)
+    weighted_accuracy = calculate_weighted_accuracy(
+        outputs,
+        labels,
+        weights=class_weights,
+    )
 
-            probs = get_Probabilities(outputs.cpu())
-            int_preds = get_intLabels(probs)
+    probabilities = get_Probabilities(outputs)
+    predictions = get_intLabels(probabilities)
+    miou, class_iou = compute_mIoU(predictions, labels, num_classes)
 
-            probs = probs.numpy()
-            int_preds = int_preds.numpy()
-
-            all_probs = np.concatenate([all_probs, probs.reshape(-1, config_dict['num_classes'])], axis=0)
-            all_predictions.extend(int_preds)
-
-    return total_loss, np.asarray(all_labels), all_probs.reshape(-1, config_dict['num_classes']), np.asarray(all_predictions)
+    probabilities = probabilities.movedim(1, -1).reshape(-1, num_classes)
+    return {
+        'loss': loss,
+        'accuracy': accuracy,
+        'weighted_accuracy': weighted_accuracy,
+        'miou': miou,
+        'class_iou': class_iou.numpy(),
+        'labels': labels.reshape(-1).numpy(),
+        'probabilities': probabilities.numpy(),
+        'predictions': predictions.reshape(-1).numpy(),
+    }
 
 def eval_model_front(config_dict: dict,
          model: nn.Module,
@@ -104,58 +100,95 @@ def eval_model_front(config_dict: dict,
     model_name = model_path.stem
 
     plot_dir = paths[1]
+    plot_dir.mkdir(exist_ok=True, parents=True)
 
-    total_loss, all_labels, all_predictions  = _eval_model(config_dict=config_dict,
-                                                                                      model=model)
-    
-    miou, avg_iou_pc = compute_mIoU(torch.asarray(all_predictions), torch.asarray(all_labels), config_dict['num_classes'])
+    outputs, labels, class_weights = _eval_model(
+        config_dict=config_dict,
+        model=model,
+    )
+    metrics = calculate_metrics(
+        outputs=outputs,
+        labels=labels,
+        class_weights=class_weights,
+        num_classes=config_dict['num_classes'],
+        focal_loss_gamma=config_dict['focal_loss_gamma'],
+    )
+    del outputs, labels
+
+    plotter = Plotter(config_dict['num_classes'], plots_dir=plot_dir)
+    plotter.cnf_matrix(
+        f'confusion_matrix_{model_name}.png',
+        target=metrics['labels'],
+        prediction=metrics['predictions'],
+        num_classes=config_dict['num_classes'],
+    )
+    plotter.prc_curve(
+        f'precision_recall_curve_{model_name}.png',
+        target=metrics['labels'],
+        pred_prob=metrics['probabilities'],
+    )
+    plotter.roc_curve(
+        f'roc_curve_{model_name}.png',
+        target=metrics['labels'],
+        pred_prob=metrics['probabilities'],
+    )
     
     print('='*20)
     print('MODEL TESTED')
     print('Model path', model_path)
-    print('Loss: ', total_loss)
-    print('mIoU: ', miou)
-    print('IoU per class: ', avg_iou_pc)
+    print('Loss: ', metrics['loss'])
+    print('Accuracy: ', metrics['accuracy'])
+    print('Weighted accuracy: ', metrics['weighted_accuracy'])
+    print('mIoU: ', metrics['miou'])
+    print('IoU per class: ', metrics['class_iou'])
     print('Plots saved to:', plot_dir)
     print('='*20)
     
-
-    miou_report = f'mIoU: {miou}\nIoU per class: {avg_iou_pc}'
+    metrics_report = (
+        f"Loss: {metrics['loss']}\n"
+        f"Accuracy: {metrics['accuracy']}\n"
+        f"Weighted accuracy: {metrics['weighted_accuracy']}\n"
+        f"mIoU: {metrics['miou']}\n"
+        f"IoU per class: {metrics['class_iou']}"
+    )
     ClassificationReport(file_path=plot_dir.joinpath(f'classification_report_{model_name}.txt'),
-                         pred=all_predictions,
-                         target=all_labels,
-                         additional_info=miou_report)
+                         pred=metrics['predictions'],
+                         target=metrics['labels'],
+                         additional_info=metrics_report)
 
 def test_function(config_dict: dict,
                   model):
-    val_dataset = Dataset(base_dir=config_dict['data_path_test'],
-                                    num_points=config_dict['num_points'],
-                                    batch_size=config_dict['batch_size'],
-                                    shuffle=False,
-                                    device=torch.device('gpu'))
-
-    valLoader = DataLoader(val_dataset,
-                             batch_size=None,
-                             num_workers = 14,
-                             pin_memory=False)
+    val_loader, _ = make_loader(
+        data_dir=config_dict['data_path_test'],
+        num_points=config_dict['num_points'],
+        batch_size=config_dict['batch_size'],
+        query_workers=config_dict.get('query_workers', 7),
+        shuffle=False,
+        max_seen=config_dict.get('max_seen', 10),
+    )
     
-    batch_x, batch_y = next(iter(valLoader))
+    batch_x, _ = next(iter(val_loader))
     batch_x = batch_x.to(config_dict['device'])
 
     model.eval()
     outputs = model(batch_x)
 
-    if outputs.shape == (batch_x.shape[0], config_dict['num_classes']):
+    expected_shape = (
+        batch_x.shape[0],
+        config_dict['num_classes'],
+        batch_x.shape[1],
+    )
+    if outputs.shape == expected_shape:
         print('Model works as expected')
     else:
         print(f'Model does not work as expected\n')
-        print(f'Expected output shape: (batch_x.shape[0], {config_dict["num_classes"]})\nReceived: {outputs.shape}')
+        print(f'Expected output shape: {expected_shape}\nReceived: {outputs.shape}')
 
-def parser():
+def parser(args=None):
         
     """
-    Parse command-line arguments for automated CNN training pipeline configuration.
-    Accepts model naming, computational device selection (CPU/CUDA/GPU), and optional test mode activation.
+    Parse command-line arguments for model evaluation.
+    Accepts model naming and evaluation mode selection.
     Returns parsed arguments with validation for device choices and formatted help text display.
     """
     
@@ -167,20 +200,10 @@ def parser():
     parser.add_argument(
         '--model_name',
         type=str,
+        required=True,
         help=(
             "Base of the model's name.\n"
             "When iterating, name also gets an ID."
-        )
-    )
-
-    parser.add_argument(
-        '--device',
-        type=str,
-        default='cpu',
-        choices=['cpu', 'cuda', 'gpu'], # choice limit
-        help=(
-            "Device for tensor based computation.\n"
-            "Pick 'cpu' or 'cuda'/ 'gpu'.\n"
         )
     )
 
@@ -190,20 +213,21 @@ def parser():
         default=0,
         choices=[0, 1],
         help=(
-            "Device for tensor based computation.\n"
+            "Evaluation mode.\n"
             'Pick:\n'
             '0: testing mode - check if model compiles and works as expected\n'
             '1: evaluate trained model'
         )
     )
 
-    return parser.parse_args()
+    return parser.parse_args(args)
 
 def main():
     args = parser()
     base_path = pth.Path(__file__).parent
-    device_name = args.device
-    device = torch.device('cuda') if (('cuda' in device_name.lower() or 'gpu' in device_name.lower()) and torch.cuda.is_available()) else torch.device('cpu')
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for evaluation")
+    device = torch.device('cuda')
 
     model_name = args.model_name
     model_name_no_num = model_name.rsplit('_', 1)[0]
@@ -217,7 +241,7 @@ def main():
     config_dict = convert_str_values(config_dict)
     config_dict['device'] = device
     
-    model = RandLANet(model_config=config_dict['model_config'], num_classes=config_dict['num_classes'])
+    model = RandLANet(model_config=config_dict['model_config'], n_classes=config_dict['num_classes'])
     model = load_model(file_path=model_dir.joinpath(f'{model_name}.pt'),
                        model=model,
                        device=device)
@@ -236,8 +260,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
 

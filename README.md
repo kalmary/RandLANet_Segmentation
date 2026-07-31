@@ -107,11 +107,10 @@ Files with `_single` suffix are meant for single training without any optimizati
 To start training run:
 ```bash
 cd src/model_pipeline
-python src/model_pipeline/TrainSegmAutomated.py --model_name MODEL_NAME --device cuda --mode 3
+python src/model_pipeline/TrainSegmAutomated.py --model_name MODEL_NAME --mode 3
 ```
 Available flags:
 - ``model_name`` - name of your model. Results are stored in ``src/model_pipeline/training_results/MODEL_NAME``,
-- ``device`` - we recommend training on strong GPUs (tested on RTX 5090), but any CUDA enabled one with at least 16 GB of VRAM (smaller models), will work fine,
 - ``mode`` - you can choose following:
     - `0` - testing mode: ,
     - `1` - single training without optimizations: good choice if fast/ based on known optimal parameters training is required.,
@@ -138,7 +137,7 @@ To evaluate trained model, run EvalSegm_RandLANet.py with proper flags:
 
 ```bash
 cd src/model_pipeline
-python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --device cuda --mode 1
+python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --mode 1
 ```
 ``model_name`` flag must be the exact name of model you got from training, but without extension name. For example:
 ```
@@ -163,17 +162,14 @@ Once models are trained, the best models and configs are choosen, copy the files
 
 To perform .LAZ files semantic segmentation, based on pretrained model run:
 ```bash
-src/python main.py --model_name MODEL_NAME --device cuda --input_path path/to/raw/data --output_path path/with/processed/files --mode 1 --verbose True
+python src/main.py --model_name MODEL_NAME --device cuda --input_path path/to/raw/data --output_path path/with/processed/files --verbose
 ```
 Available flags:
 - ``model_name`` - model name without its extension (.pt files supported),
 - ``device``,
-- ``input_path`` - path to directory with raw files to process,
-- ``output_path`` - path to directory with processed files. If not given ``modified`` directory is created in every file's parent directory. Processed files are saved with ``_mod`` suffix.  
-- ``mode`` - you can choose following:
-    - `0` - testing mode: ,
-    - `1` - processing files mode,
-- ``verbose``.
+- ``input_path`` - path to one LAS/LAZ file or a directory with files to process,
+- ``output_path`` - optional output directory. Without it, each processed file is saved beside its source,
+- ``verbose`` - display processing progress.
 
 If more customizable approach is necessary/ point clouds are preloaded, you can also use just segmentation processing parts:
 ```python
