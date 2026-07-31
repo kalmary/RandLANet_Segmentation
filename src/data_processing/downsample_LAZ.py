@@ -1,14 +1,15 @@
 import numpy as np
 import laspy
+import hashlib
 import pickle
 from pathlib import Path
-from sklearn.neighbors import KDTree
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 import shutil
 
 
 # ------------------------------------------------------------------
-# 1. Load + normalise intensity
+# 1. Load + normalise intensity only
 # ------------------------------------------------------------------
 def load_and_normalise(las_path):
     las = laspy.read(las_path)
@@ -19,9 +20,7 @@ def load_and_normalise(las_path):
         np.asarray(las.z, dtype=np.float64),
     ], axis=1)
 
-    # centre whole cloud before casting
     xyz -= xyz.mean(axis=0)
-
     # NOW safe to cast — values are small, float32 precision is fine
     xyz = xyz.astype(np.float32)
 
@@ -134,6 +133,10 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
     cut_dir.mkdir(parents=True, exist_ok=True)
 
     stem = Path(las_path).stem
+    source_id = hashlib.blake2b(
+        str(Path(las_path).resolve()).encode("utf-8"),
+        digest_size=8
+    ).hexdigest()
     tqdm.write(f"\n{'─'*60}")
     tqdm.write(f"Processing: {las_path}")
 
@@ -157,7 +160,9 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
     for tile_xyz, tile_feats, tile_labels, (ti, tj) in iter_tiles(
         xyz, feats, labels, tile_size
     ):
-        name = f"{stem}_tile_{ti:03d}_{tj:03d}"
+        name = f"{stem}_{source_id}_tile_{ti:03d}_{tj:03d}"
+        pcd_path = cut_dir / f"{name}.npy"
+        tree_path = cut_dir / f"{name}.pkl"
 
         tile_xyz = tile_xyz.astype(np.float32)
 
@@ -165,11 +170,12 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
             [tile_xyz, tile_feats, tile_labels[:, None].astype(np.float32)],
             axis=1
         )
-        np.save(cut_dir / f"{name}.npy", arr)
 
-        tree = KDTree(tile_xyz)
-        with open(cut_dir / f"{name}.pkl", "wb") as f:
-            pickle.dump(tree, f)
+        tree = cKDTree(tile_xyz, leafsize=40)
+        with pcd_path.open("xb") as f:
+            np.save(f, arr)
+        with tree_path.open("xb") as f:
+            pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         saved += 1
 
@@ -223,7 +229,8 @@ if __name__ == "__main__":
     LAS_FILES  = sorted(Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/raw").glob("*.las"))
     CUT_DIR    = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/cut")
     SPLIT_DIR  = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist")
-    VOXEL_SIZE = 0.25
+    
+    VOXEL_SIZE = 0.10
     TILE_SIZE  = 40.0
 
     for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
