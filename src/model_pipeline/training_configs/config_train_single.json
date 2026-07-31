@@ -4,7 +4,7 @@
     "data_path_train": "/mnt/data-ssd/DALES/dataset_1/train.h5",
     "data_path_test": "/mnt/data-ssd/DALES/dataset_1/test.h5",
     "data_path_val": "/mnt/data-ssd/DALES/dataset_1/validation.h5",
-    "num_classes": 10,
+    "num_classes": 8,
     "batch_size": 6,
     "num_points": 8192,
     "num_neighbors": 32,
