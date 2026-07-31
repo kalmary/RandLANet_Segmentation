@@ -18,10 +18,10 @@ try:
     from .utils import load_json, load_model, pcd_manipulation
 except ImportError:
     try:
-        from final_files.RandLANet_CB import RandLANet
+        from final_files.RandLANet_CB_pooled import RandLANet
         from utils import load_json, load_model, pcd_manipulation
     except ImportError:
-        from PCDSegmentation.src.final_files.RandLANet_CB import RandLANet
+        from PCDSegmentation.src.final_files.RandLANet_CB_pooled import RandLANet
         from PCDSegmentation.src.utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
@@ -330,7 +330,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
+    path2laz = "/Users/michalsiniarski/Documents/DATA/BRIK/GRAJEWO-TEST/ITWL_Grajewo20_mini_rln.laz"
 
     import laspy
     import pathlib as pth
