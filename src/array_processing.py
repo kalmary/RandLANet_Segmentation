@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 
 try:
-    from .final_files.RandLANet_CB import RandLANet
+    from .final_files.RandLANet_CB_pooled import RandLANet
     from .utils import load_json, load_model, pcd_manipulation
 except ImportError:
     try:
@@ -209,9 +209,9 @@ class SegmentClass:
         filled_mask = np.zeros(points.shape[0], dtype=bool)
 
         generator = pcd_manipulation.voxelGridFragmentation(points,
-                                                            voxel_size = np.array([self.voxel_size_small, self.voxel_size_small, self.voxel_size_small]),
+                                                            voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
                                                             num_points = self._config['num_points'],
-                                                            overlap_ratio=0.3,
+                                                            overlap_ratio=0.4,
                                                             verbose=self.verbose,
                                                             desc="Segmenting small voxels",
                                                             position=2)
@@ -330,7 +330,7 @@ class SegmentClass:
 
         
 def test_segm():
-    path2laz = "/Users/michalsiniarski/Documents/DATA/BRIK/GRAJEWO-TEST/ITWL_Grajewo20_mini_rln.laz"
+    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
 
     import laspy
     import pathlib as pth
