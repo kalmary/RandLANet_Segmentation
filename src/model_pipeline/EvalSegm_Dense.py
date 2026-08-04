@@ -17,6 +17,7 @@ from utils import ClassificationReport, Plotter, compute_mIoU
 
 
 POINT_CLOUD_SUFFIXES = {'.las', '.laz'}
+MAX_POINTS_PER_FILE = 0
 
 
 def _model_name(value: str) -> str:
@@ -44,7 +45,11 @@ def collect_labels(
     segmenter: SegmentClass,
     input_path: pth.Path,
     verbose: bool = False,
+    max_points_per_file: int = MAX_POINTS_PER_FILE,
 ) -> tuple[np.ndarray, np.ndarray]:
+    if max_points_per_file < 0:
+        raise ValueError('max_points_per_file cannot be negative')
+
     files = _input_files(input_path)
     if not files:
         raise FileNotFoundError(f'No LAS or LAZ files in {input_path}')
@@ -69,21 +74,53 @@ def collect_labels(
                 f'but the model has {segmenter.n_classes} classes'
             )
 
-        points = np.column_stack((cloud.x, cloud.y, cloud.z))
-        intensity = np.asarray(cloud.intensity)
+        evaluation_indices = None
+        if max_points_per_file:
+            evaluation_indices = np.flatnonzero(assessed)
+            if len(evaluation_indices) > max_points_per_file:
+                evaluation_indices = np.sort(
+                    np.random.choice(
+                        evaluation_indices,
+                        size=max_points_per_file,
+                        replace=False,
+                    )
+                )
+            targets = source_labels[evaluation_indices] - 1
+
+        if evaluation_indices is None:
+            points = np.column_stack((cloud.x, cloud.y, cloud.z))
+            intensity = np.asarray(cloud.intensity)
+            expected_predictions = len(source_labels)
+        else:
+            points = np.column_stack(
+                (
+                    cloud.X[evaluation_indices] * cloud.header.x_scale
+                    + cloud.header.x_offset,
+                    cloud.Y[evaluation_indices] * cloud.header.y_scale
+                    + cloud.header.y_offset,
+                    cloud.Z[evaluation_indices] * cloud.header.z_scale
+                    + cloud.header.z_offset,
+                )
+            )
+            intensity = np.asarray(cloud.intensity[evaluation_indices])
+            expected_predictions = len(evaluation_indices)
+
         predictions = np.asarray(
             segmenter.segment_pcd(points, intensity),
             dtype=np.int16,
         )
-        if predictions.shape != source_labels.shape:
+        if predictions.shape != (expected_predictions,):
             raise ValueError(
-                f'Expected {len(source_labels)} predictions for {file_path}, '
+                f'Expected {expected_predictions} predictions for {file_path}, '
                 f'got shape {predictions.shape}'
             )
         if predictions.min() < 0 or predictions.max() >= segmenter.n_classes:
             raise ValueError(f'Predictions outside the model class range for {file_path}')
 
-        prediction_parts.append(predictions[assessed].astype(np.int8))
+        if evaluation_indices is None:
+            predictions = predictions[assessed]
+
+        prediction_parts.append(predictions.astype(np.int8))
         target_parts.append(targets.astype(np.int8))
 
         if verbose:
@@ -128,6 +165,7 @@ def eval_model_front(
     model_path: pth.Path,
     plot_dir: pth.Path,
     verbose: bool = False,
+    max_points_per_file: int = MAX_POINTS_PER_FILE,
 ) -> dict:
     model_name = model_path.stem
     plot_dir.mkdir(exist_ok=True, parents=True)
@@ -136,6 +174,7 @@ def eval_model_front(
         segmenter,
         input_path,
         verbose=verbose,
+        max_points_per_file=max_points_per_file,
     )
     metrics = calculate_metrics(
         predictions,
@@ -203,7 +242,7 @@ def main():
         config_dir=config_dir,
         model_dir=model_dir,
         device=torch.device('cuda'),
-        pbar_bool=True,
+        pbar_bool=False,
     )
     input_path = pth.Path(segmenter.config['data_path_test'])
     eval_model_front(
@@ -212,6 +251,7 @@ def main():
         model_path=model_path,
         plot_dir=plot_dir,
         verbose=True,
+        max_points_per_file=MAX_POINTS_PER_FILE,
     )
 
 

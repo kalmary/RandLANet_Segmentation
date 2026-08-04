@@ -24,6 +24,15 @@ class FixedSegmenter:
         return (np.asarray(intensity) > 0).astype(np.int8)
 
 
+class RecordingSegmenter(FixedSegmenter):
+    def __init__(self):
+        self.point_counts = []
+
+    def segment_pcd(self, points, intensity):
+        self.point_counts.append(len(points))
+        return super().segment_pcd(points, intensity)
+
+
 class PlotRecorder:
     calls = []
 
@@ -80,6 +89,44 @@ class DenseEvaluationTests(unittest.TestCase):
         np.testing.assert_array_equal(targets, [0, 1, 0, 1, 0])
         self.assertEqual(predictions.dtype, np.int8)
         self.assertEqual(targets.dtype, np.int8)
+
+    def test_samples_at_most_max_points_before_segmenting_each_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            input_dir = pathlib.Path(directory)
+            write_las(
+                input_dir / 'first.las',
+                classifications=[1, 2, 0, 1, 2],
+                intensity=[0, 1, 1, 0, 1],
+            )
+            write_las(
+                input_dir / 'second.las',
+                classifications=[2, 0],
+                intensity=[1, 0],
+            )
+            segmenter = RecordingSegmenter()
+
+            with patch.object(
+                evaluation.np.random,
+                'choice',
+                return_value=np.array([0, 3]),
+            ):
+                predictions, targets = evaluation.collect_labels(
+                    segmenter,
+                    input_dir,
+                    max_points_per_file=2,
+                )
+
+        self.assertEqual(segmenter.point_counts, [2, 1])
+        np.testing.assert_array_equal(predictions, [0, 0, 1])
+        np.testing.assert_array_equal(targets, [0, 0, 1])
+
+    def test_rejects_negative_max_points_per_file(self):
+        with self.assertRaisesRegex(ValueError, 'cannot be negative'):
+            evaluation.collect_labels(
+                FixedSegmenter(),
+                pathlib.Path('unused'),
+                max_points_per_file=-1,
+            )
 
     def test_metrics_use_hard_labels_only(self):
         metrics = evaluation.calculate_metrics(
