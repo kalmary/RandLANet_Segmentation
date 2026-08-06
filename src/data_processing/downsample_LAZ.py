@@ -25,7 +25,8 @@ def load_and_normalise(las_path):
     xyz = xyz.astype(np.float32)
 
     intensity = np.array(las.intensity, dtype=np.float32)
-    intensity = np.log1p(intensity) / np.log1p(intensity.max())
+    intensity = intensity.reshape(-1, 1)
+    intensity = intensity / (intensity.max() + 1e-6) # normalise to [0, 1]
     feats     = intensity[:, None]
     labels    = np.array(las.classification, dtype=np.int32)
 
@@ -128,7 +129,7 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
 # ------------------------------------------------------------------
 # 4. Save tiles as .npy + precomputed KDTree as .pkl
 # ------------------------------------------------------------------
-def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
+def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
     cut_dir = Path(cut_dir)
     cut_dir.mkdir(parents=True, exist_ok=True)
 
