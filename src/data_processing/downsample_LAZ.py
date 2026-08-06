@@ -27,7 +27,7 @@ def load_and_normalise(las_path):
     intensity = np.array(las.intensity, dtype=np.float32)
     intensity = intensity.reshape(-1, 1)
     intensity = intensity / (intensity.max() + 1e-6) # normalise to [0, 1]
-    feats     = intensity[:, None]
+    feats     = intensity
     labels    = np.array(las.classification, dtype=np.int32)
 
     xyz = xyz[labels!=0]
@@ -223,18 +223,50 @@ def split_dataset(cut_dir, out_dir, train=0.7, val=0.15, test=0.15, seed=42):
     print(f"\nSplit complete: {counts}")
 
 
+def split_raw_files(las_root, split_dir, train=0.7, val=0.15, test=0.15, seed=42):
+    las_root = Path(las_root)
+    split_dir = Path(split_dir)
+
+    las_files = sorted(las_root.rglob("*.las"))
+    if not las_files:
+        raise RuntimeError(f"No LAS files found in {las_root}")
+
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(las_files))
+    n_train = int(len(las_files) * train)
+    n_val = int(len(las_files) * val)
+
+    split_indices = {
+        "train": order[:n_train],
+        "val": order[n_train:n_train + n_val],
+        "test": order[n_train + n_val:]
+    }
+
+    for split, indices in split_indices.items():
+        target_dir = split_dir / split
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for idx in indices:
+            src = las_files[idx]
+            dst = target_dir / src.name
+            shutil.copy(src, dst)
+
+    return split_dir
+
+
 # ------------------------------------------------------------------
 # Entry point
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    LAS_FILES  = sorted(Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/raw").glob("*.las"))
-    CUT_DIR    = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/cut")
-    SPLIT_DIR  = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist")
+    LAS_ROOT   = Path("/Users/michalsiniarski/Documents/DATA/BRIK/DATASET/obrobione2")
+    CUT_DIR    = Path("/Users/michalsiniarski/Documents/DATA/BRIK/DATASET/split")
+    SPLIT_DIR  = Path("/Users/michalsiniarski/Documents/DATA/BRIK/DATASET/cut")
     
     VOXEL_SIZE = 0.10
-    TILE_SIZE  = 40.0
+    TILE_SIZE  = 60.0
 
-    for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
-        save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
+    split_raw_files(LAS_ROOT, SPLIT_DIR)
 
-    split_dataset(CUT_DIR, SPLIT_DIR)
+    for split in ("train", "val", "test"):
+        split_src = SPLIT_DIR / split
+        for las_path in sorted(split_src.glob("*.las")):
+            save_tiles(las_path, CUT_DIR / split, VOXEL_SIZE, TILE_SIZE)
