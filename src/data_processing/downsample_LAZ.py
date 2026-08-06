@@ -120,7 +120,7 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
                     continue
 
                 tile_xyz        = xyz[mask].copy()
-                tile_xyz[:, :2] -= tile_xyz[:, :2].mean(axis=0)
+                tile_xyz -= tile_xyz.mean(axis=0)
 
                 pbar.set_postfix_str(f"{mask.sum():,} pts")
                 yield tile_xyz, feats[mask].copy(), tile_labels, (i, j)
