@@ -22,7 +22,7 @@ from utils.pcd_manipulation import voxelGridFragmentation
 from utils import convert_str_values, load_json, save2json, LogScaler
 import open3d as o3d
 
-def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dict) -> None:
+def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path) -> None:
     if not work_dir.exists():
         raise ValueError('Incorrect path:', work_dir)
 
@@ -37,28 +37,30 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
     val_pth = goal_dir.joinpath('val')
     val_pth.mkdir(exist_ok=True, parents=True)
 
-    all_paths = list(work_dir.rglob('*.las')) # todo change to desired format later
-    random.shuffle(all_paths)
+    all_paths = list(work_dir.rglob('*.las'))
 
-    train_paths, test_paths = train_test_split(all_paths, 
-                                               train_size=folder_split['train_ratio'],
-                                               random_state=42, 
-                                               shuffle=True)
+    train_paths = []
+    test_paths = []
+    val_paths = []
+    for path in all_paths:
+        parent_folder = path.parent.name
+        if parent_folder == 'train':
+            train_paths.append(path)
+        elif parent_folder == 'test':
+            test_paths.append(path)
+        elif parent_folder == 'val':
+            val_paths.append(path)
 
-    test_paths, val_paths = train_test_split(test_paths,
-                                             train_size=folder_split['test_ratio'] /
-                                                                    (folder_split['test_ratio'] + folder_split['val_ratio']),
-                                             random_state=42, 
-                                             shuffle=True)
+    if not any((train_paths, test_paths, val_paths)):
+        raise RuntimeError('No .las files found in train/test/val subfolders of work_dir.')
 
+    random.shuffle(train_paths)
+    random.shuffle(test_paths)
+    random.shuffle(val_paths)
 
-
-    # random.shuffle(all_paths)
-    progress_train = tqdm(enumerate(train_paths), desc = f'Decimation of training data in folder: {work_dir}', total=len(train_paths))
-    progress_test = tqdm(enumerate(test_paths), desc=f'Decimation of testing data in folder: {work_dir}',
-                          total=len(test_paths))
-    progress_val = tqdm(enumerate(val_paths), desc=f'Decimation of validation data in folder: {work_dir}',
-                          total=len(val_paths))
+    progress_train = tqdm(enumerate(train_paths), desc=f'Decimation of training data in folder: {work_dir}', total=len(train_paths))
+    progress_test = tqdm(enumerate(test_paths), desc=f'Decimation of testing data in folder: {work_dir}', total=len(test_paths))
+    progress_val = tqdm(enumerate(val_paths), desc=f'Decimation of validation data in folder: {work_dir}', total=len(val_paths))
 
     scaler = MinMaxScaler(feature_range=(0, 10.))
 
@@ -376,7 +378,7 @@ def main():
     }
     folder_split = convert_str_values(folder_split)
 
-    decimate_chunk_laz(source, decimated, folder_split)
+    decimate_chunk_laz(source, decimated)
     rebalance_dataset(decimated, folder_split)
 
     path2train, path2test, path2val = convert_dataset(decimated, converted)
