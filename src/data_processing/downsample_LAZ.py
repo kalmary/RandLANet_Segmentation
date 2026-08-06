@@ -27,7 +27,7 @@ def load_and_normalise(las_path):
     intensity = np.array(las.intensity, dtype=np.float32)
     intensity = intensity.reshape(-1, 1)
     intensity = intensity / (intensity.max() + 1e-6) # normalise to [0, 1]
-    feats     = intensity[:, None]
+    feats     = intensity  # keep shape (N, 1) for concatenation with xyz and labels
     labels    = np.array(las.classification, dtype=np.int32)
 
     xyz = xyz[labels!=0]
@@ -186,39 +186,25 @@ def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
 # ------------------------------------------------------------------
 # 5. Train / val / test split
 # ------------------------------------------------------------------
-def split_dataset(cut_dir, out_dir, train=0.7, val=0.15, test=0.15, seed=42):
-    assert abs(train + val + test - 1.0) < 1e-6
-
+def split_dataset(cut_dir, out_dir):
     cut_dir = Path(cut_dir)
     out_dir = Path(out_dir)
+
+    split_dirs = {split: cut_dir / split for split in ("train", "val", "test")}
+    if not all(d.exists() for d in split_dirs.values()):
+        raise RuntimeError("cut_dir must contain train/, val/, and test/ subfolders")
 
     for split in ("train", "val", "test"):
         (out_dir / split).mkdir(parents=True, exist_ok=True)
 
-    tiles      = sorted(cut_dir.glob("*.npy"))
-    scan_names = sorted(set("_".join(t.stem.split("_")[:-3]) for t in tiles))
-
-    rng     = np.random.default_rng(seed)
-    order   = rng.permutation(len(scan_names))
-    n_train = int(len(scan_names) * train)
-    n_val   = int(len(scan_names) * val)
-
-    train_scans = set(scan_names[i] for i in order[:n_train])
-    val_scans   = set(scan_names[i] for i in order[n_train:n_train + n_val])
-
     counts = {"train": 0, "val": 0, "test": 0}
-    for npy_path in tqdm(tiles, desc="Splitting", unit="tile"):
-        scan     = "_".join(npy_path.stem.split("_")[:-3])
-        pkl_path = npy_path.with_suffix(".pkl")
-
-        split = (
-            "train" if scan in train_scans else
-            "val"   if scan in val_scans   else
-            "test"
-        )
-        shutil.copy(npy_path, out_dir / split / npy_path.name)
-        shutil.copy(pkl_path, out_dir / split / pkl_path.name)
-        counts[split] += 1
+    for split, src_dir in split_dirs.items():
+        for npy_path in tqdm(sorted(src_dir.glob("*.npy")), desc=f"Copying {split}", unit="tile"):
+            pkl_path = npy_path.with_suffix(".pkl")
+            shutil.copy(npy_path, out_dir / split / npy_path.name)
+            if pkl_path.exists():
+                shutil.copy(pkl_path, out_dir / split / pkl_path.name)
+            counts[split] += 1
 
     print(f"\nSplit complete: {counts}")
 
@@ -227,14 +213,15 @@ def split_dataset(cut_dir, out_dir, train=0.7, val=0.15, test=0.15, seed=42):
 # Entry point
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    LAS_FILES  = sorted(Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/raw").glob("*.las"))
-    CUT_DIR    = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/cut")
-    SPLIT_DIR  = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist")
+    LAS_ROOT   = Path("/Users/michalsiniarski/Documents/DATA/DALES/raw")
+    LAS_FILES  = sorted(LAS_ROOT.rglob("*.las"))
+    CUT_DIR    = Path("/Users/michalsiniarski/Documents/DATA/DALES/cut")
     
     VOXEL_SIZE = 0.10
-    TILE_SIZE  = 40.0
+    TILE_SIZE  = 60.0
 
     for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
-        save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
-
-    split_dataset(CUT_DIR, SPLIT_DIR)
+        split_name = las_path.parent.name
+        if split_name not in {"train", "val", "test"}:
+            raise RuntimeError(f"Unexpected LAS parent folder: {las_path.parent}")
+        save_tiles(las_path, CUT_DIR / split_name, VOXEL_SIZE, TILE_SIZE)
