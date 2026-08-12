@@ -61,7 +61,7 @@ def voxel_subsample_iter(xyz, feats, labels, voxel_size=0.10):
     return xyz[chosen], feats[chosen], labels[chosen]
 
 def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
-    tqdm.write(f"  Starting voxel subsample: {xyz.shape[0], } pts...")
+    tqdm.write(f"  Starting voxel subsample: {xyz.shape[0]} pts...")
     keys     = np.floor(xyz / voxel_size).astype(np.int32)
     centers  = (keys + 0.5) * voxel_size
     dists_sq = np.sum((xyz - centers) ** 2, axis=1)
@@ -85,7 +85,7 @@ def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
     _, first   = np.unique(key_sorted, return_index=True)
     chosen     = order[first]
 
-    tqdm.write(f"  voxel subsample: {len(xyz):,} → {len(chosen):,} pts")
+    tqdm.write(f"  voxel subsample: {len(xyz)} → {len(chosen)} pts")
 
     return xyz[chosen], feats[chosen], labels[chosen]
 
@@ -102,7 +102,7 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
     y_starts = np.arange(mins[1], maxs[1], tile_size)
 
     total = len(x_starts) * len(y_starts)
-    with tqdm(total=total, desc="  Tiling", unit="cell", leave=False) as pbar:
+    with tqdm(total=total, desc="  Tiling", unit="cell", leave=False, position=1) as pbar:
         for i, x0 in enumerate(x_starts):
             for j, y0 in enumerate(y_starts):
                 pbar.update(1)
@@ -115,6 +115,10 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
                     continue
 
                 tile_labels = labels[mask]
+                if np.unique(tile_labels).size <= 3:
+                    pbar.set_postfix_str("skip — only three classes")
+                    continue
+
                 if set(tile_labels.tolist()).issubset(SKIP_CLASSES):
                     pbar.set_postfix_str("skip — only ground/tree")
                     continue
@@ -266,7 +270,12 @@ if __name__ == "__main__":
 
     split_raw_files(LAS_ROOT, SPLIT_DIR)
 
+    las_paths = []
     for split in ("train", "val", "test"):
         split_src = SPLIT_DIR / split
-        for las_path in sorted(split_src.glob("*.las")):
-            save_tiles(las_path, CUT_DIR / split, VOXEL_SIZE, TILE_SIZE)
+        las_paths.extend(sorted(split_src.glob("*.las")))
+
+    with tqdm(total=len(las_paths), desc="Overall progress", unit="file") as overall_pbar:
+        for las_path in las_paths:
+            save_tiles(las_path, CUT_DIR / las_path.parent.name, VOXEL_SIZE, TILE_SIZE)
+            overall_pbar.update(1)
