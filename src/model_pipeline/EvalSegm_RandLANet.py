@@ -16,7 +16,7 @@ from RandLANet_CB import RandLANet
 from _data_loader import make_loader
 
 from utils import load_json, load_model, convert_str_values
-from utils import calculate_accuracy, calculate_weighted_accuracy, compute_mIoU
+from utils import calculate_accuracy, compute_mIoU
 from utils import compute_pos_weights_prob, FocalLoss, get_intLabels, get_Probabilities
 from utils import Plotter, ClassificationReport
 
@@ -34,8 +34,6 @@ def _eval_model(config_dict: dict,
         batch_size=config_dict['batch_size'],
         query_workers=config_dict.get('query_workers', 7),
         shuffle=False,
-        pos_weights=class_weights.numpy(),
-        max_seen=config_dict.get('max_seen', 10),
     )
 
     output_batches = []
@@ -70,11 +68,6 @@ def calculate_metrics(outputs: torch.Tensor,
     )
     loss = criterion(outputs, labels).item()
     accuracy = calculate_accuracy(outputs, labels)
-    weighted_accuracy = calculate_weighted_accuracy(
-        outputs,
-        labels,
-        weights=class_weights,
-    )
 
     probabilities = get_Probabilities(outputs)
     predictions = get_intLabels(probabilities)
@@ -84,7 +77,6 @@ def calculate_metrics(outputs: torch.Tensor,
     return {
         'loss': loss,
         'accuracy': accuracy,
-        'weighted_accuracy': weighted_accuracy,
         'miou': miou,
         'class_iou': class_iou.numpy(),
         'labels': labels.reshape(-1).numpy(),
@@ -138,7 +130,6 @@ def eval_model_front(config_dict: dict,
     print('Model path', model_path)
     print('Loss: ', metrics['loss'])
     print('Accuracy: ', metrics['accuracy'])
-    print('Weighted accuracy: ', metrics['weighted_accuracy'])
     print('mIoU: ', metrics['miou'])
     print('IoU per class: ', metrics['class_iou'])
     print('Plots saved to:', plot_dir)
@@ -147,7 +138,6 @@ def eval_model_front(config_dict: dict,
     metrics_report = (
         f"Loss: {metrics['loss']}\n"
         f"Accuracy: {metrics['accuracy']}\n"
-        f"Weighted accuracy: {metrics['weighted_accuracy']}\n"
         f"mIoU: {metrics['miou']}\n"
         f"IoU per class: {metrics['class_iou']}"
     )
@@ -164,7 +154,6 @@ def test_function(config_dict: dict,
         batch_size=config_dict['batch_size'],
         query_workers=config_dict.get('query_workers', 7),
         shuffle=False,
-        max_seen=config_dict.get('max_seen', 10),
     )
     
     batch_x, _ = next(iter(val_loader))

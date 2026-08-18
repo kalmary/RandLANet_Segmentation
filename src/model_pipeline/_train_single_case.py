@@ -1,3 +1,4 @@
+import copy
 import pathlib as pth
 import sys
 import torch
@@ -14,9 +15,10 @@ from RandLANet_CB import RandLANet
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from utils import compute_mIoU, calculate_weighted_accuracy
+from utils import compute_mIoU
 from utils import compute_pos_weights_prob, get_dataset_len, FocalLoss
 from utils import wrap_hist
+from utils.nn_utils import calculate_accuracy
 
 from tqdm import tqdm
 from typing import Union, Generator
@@ -42,7 +44,7 @@ def _build_scheduler(optimizer, training_dict: dict, total_t: int | None):
     return OneCycleLR(
         optimizer,
         max_lr=training_dict['learning_rate'],
-        total_steps=total_t * training_dict['epochs'] * training_dict['train_repeat'],
+        total_steps=total_t * training_dict['epochs'],
         pct_start=training_dict['pc_start'],
         anneal_strategy='cos',
         div_factor=training_dict['div_factor'],
@@ -78,8 +80,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             batch_size=training_dict['batch_size'],
             query_workers=training_dict.get('query_workers', 7),
             shuffle=True,
-            pos_weights=class_weights_t.numpy(),
-            max_seen=training_dict.get('max_seen', 10),
         )
 
         valLoader, _ = make_loader(
@@ -88,8 +88,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             batch_size=training_dict['batch_size'],
             query_workers=training_dict.get('query_workers', 7),
             shuffle=False,
-            pos_weights=class_weights_v.numpy(),
-            max_seen=training_dict.get('max_seen', 10),
         )
 
         total_t, total_v = _dataset_lengths(
@@ -98,43 +96,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             enabled=True,
         )
 
-        if training_dict['model'] is None:
-            model = RandLANet(model_config=training_dict['model_config'],
-                            n_classes=training_dict['num_classes'])
-        else:
-            model = training_dict['model']
-
-        model.to(training_dict['device'])
-
-
-        criterion_t = FocalLoss(
-            alpha=class_weights_t.to(device_loss),
-            gamma=training_dict['focal_loss_gamma'],
-            smoothing=0.1,
-            reduction='mean',
-        ).to(device_loss)
-
-        criterion_v = FocalLoss(
-            alpha=class_weights_v.to(device_loss),
-            gamma=training_dict['focal_loss_gamma'],
-            smoothing=0.1,
-            reduction='mean',
-        ).to(device_loss)
-
-
-        optimizer = optim.AdamW(model.parameters(), lr = training_dict['learning_rate'], weight_decay=training_dict['weight_decay'])
-
-        scheduler = _build_scheduler(optimizer, training_dict, total_t)
-
-        loss_hist = []
-        acc_hist = []
-        miou_hist = []
-
-        loss_v_hist = []
-        acc_v_hist = []
-        miou_v_hist = []
-
-
         repeat_pbar = tqdm(range(training_dict['train_repeat']), 
                             desc="Training Repetition", 
                             unit="repeat",
@@ -142,6 +103,42 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                             leave=False) 
 
         for _ in repeat_pbar:
+            if training_dict['model'] is None:
+                model = RandLANet(model_config=training_dict['model_config'],
+                                n_classes=training_dict['num_classes'])
+            else:
+                model = copy.deepcopy(training_dict['model'])
+
+            model.to(training_dict['device'])
+
+            criterion_t = FocalLoss(
+                alpha=class_weights_t.to(device_loss),
+                gamma=training_dict['focal_loss_gamma'],
+                smoothing=0.1,
+                reduction='mean',
+            ).to(device_loss)
+
+            criterion_v = FocalLoss(
+                alpha=class_weights_v.to(device_loss),
+                gamma=training_dict['focal_loss_gamma'],
+                smoothing=0.1,
+                reduction='mean',
+            ).to(device_loss)
+
+            optimizer = optim.AdamW(
+                model.parameters(),
+                lr=training_dict['learning_rate'],
+                weight_decay=training_dict['weight_decay'],
+            )
+            scheduler = _build_scheduler(optimizer, training_dict, total_t)
+
+            loss_hist = []
+            acc_hist = []
+            miou_hist = []
+
+            loss_v_hist = []
+            acc_v_hist = []
+            miou_v_hist = []
 
             epoch_pbar = tqdm(range(training_dict['epochs']), 
                                 desc="Epoch Progress", 
@@ -190,8 +187,6 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                     ):
                         scheduler.step()
 
-                    # accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
-
                     current_lr = optimizer.param_groups[0]['lr']
 
                     epoch_loss_t += loss_t.item() * batch_y.size(0)
@@ -229,7 +224,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         loss_v = criterion_v(outputs, batch_y)
 
-                        accuracy_v = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_v.to(device_loss))
+                        accuracy_v = calculate_accuracy(outputs, batch_y)
 
                         mIoU, _ = compute_mIoU(outputs.cpu(), batch_y.cpu(), training_dict['num_classes'])
 

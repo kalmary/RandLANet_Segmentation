@@ -128,15 +128,18 @@ Available flags:
   - `2` — Optuna optimization using `config_train.json`,
   - `3` — compile model configs and estimate their resource requirements.
 
-Grid search is no longer supported. Training uses `FocalLoss` with class weights
+Training uses `FocalLoss` with class weights
 computed by `compute_pos_weights_prob()` from the labels in column `4` of every
-NPY tile. Missing directories, directories without NPY tiles, malformed tiles,
-empty tiles, and labels outside the configured classes stop training with a
-descriptive error.
+NPY tile. Sampling itself is class-independent: crop centers follow a spatial
+possibility score and each tile point must occur in at least one crop. Missing
+directories, directories without NPY tiles, malformed tiles, empty tiles, and
+labels outside the configured classes stop training with a descriptive error.
 
-Training does not run a preliminary pass to measure the iterable loaders.
-Progress bars therefore use unknown totals, and `ReduceLROnPlateau` adjusts the
-learning rate once per epoch based on validation loss.
+Before training, both iterable loaders are traversed once to measure progress
+bar and `OneCycleLR` step counts. Every `train_repeat` is an independent run with
+a fresh model, optimizer, scheduler, loss instances, and metric histories. The
+outer checkpoint logic selects the best epoch across all repetitions using
+ordinary validation accuracy and validation loss.
 
 Mode `2` currently runs 80 Optuna trials. Change `n_trials` in `main()` if a
 different optimization budget is required. The best model, its config, and
@@ -159,10 +162,10 @@ python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --mode 1
 - `0` — verify that the trained model compiles and can run,
 - `1` — evaluate the model and generate outputs.
 
-Evaluation uses the same probabilistic class weights and `FocalLoss` as
-training. Dataset validation rejects missing directories, missing NPY tiles,
-malformed or empty tiles, missing matching PKL trees, and invalid labels before
-metrics are generated.
+Evaluation uses the same spatial possibility sampler and `FocalLoss` class
+weights as training, while reporting ordinary accuracy. Dataset validation
+rejects missing directories, missing NPY tiles, malformed or empty tiles,
+missing matching PKL trees, and invalid labels before metrics are generated.
 
 Evaluation outputs include precision-recall and ROC curves, a confusion matrix,
 and a text classification report. Copy selected trained models and configs to
@@ -220,8 +223,9 @@ Tests use pytest:
 python -m pytest -q
 ```
 
-The persistent DataLoader test starts a multiprocessing worker and therefore
-requires an environment that permits process synchronization primitives.
+The DataLoader uses one non-persistent spawned worker per traversal, so tests
+that iterate it require an environment that permits process synchronization
+primitives.
 
 # 7. Citation <a name="citation"></a>
 

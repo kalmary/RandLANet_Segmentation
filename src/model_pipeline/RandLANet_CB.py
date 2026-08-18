@@ -16,12 +16,12 @@ from typing import Union
 def input_norm(input: torch.Tensor) -> torch.Tensor:
     """
     input: (B, N, 4) — xyz relative to sphere center + intensity [0,1]
-    xyz:       divide by per-sample max abs → [-1, 1]
-    intensity: subtract 0.5             → [-0.5, 0.5]
+    xyz:       divide by per-sample maximum Euclidean radius
+    intensity: subtract 0.5 → [-0.5, 0.5]
     """
     input = input.clone()
-    r = input[..., :3].abs().amax(dim=1, keepdim=True)  # (B, 1, 3)
-    input[..., :3] = input[..., :3] / (r + 1e-6)
+    r_max = torch.linalg.vector_norm(input[..., :3], dim=-1).amax(dim=1, keepdim=True)
+    input[..., :3] = input[..., :3] / r_max.unsqueeze(-1).clamp_min(1e-6)
     input[..., 3] = input[..., 3] - 0.5
     return input
 
@@ -71,7 +71,13 @@ class LocalSpatialEncoding(nn.Module):
         ], dim=1)
 
         encoded = self.mlp(concat)
-        return torch.cat([encoded, features.expand(-1, -1, -1, K)], dim=1)
+        feature_idx = idx.unsqueeze(1).expand(-1, features.size(1), -1, -1)
+        neighbor_features = torch.gather(
+            features.squeeze(-1).unsqueeze(-1).expand(-1, -1, -1, K),
+            2,
+            feature_idx,
+        )
+        return torch.cat([encoded, neighbor_features], dim=1)
 
 
 class AttentivePooling(nn.Module):
@@ -106,7 +112,8 @@ class LocalFeatureAggregation(nn.Module):
         x = self.mlp1(features)
         x = self.pool1(self.lse1(coords, x, knn_output))
         x = self.pool2(self.lse2(coords, x, knn_output))
-        return self.relu(self.mlp2(x) + self.shortcut(features))
+        x = self.relu(self.mlp2(x) + self.shortcut(features))
+        return x, knn_output[0]
 
 
 class RandLANet(nn.Module):
@@ -189,10 +196,11 @@ class RandLANet(nn.Module):
         # encoder
         for lfa in self.encoder:
             current_indices = torch.arange(N // decimation_ratio, device=coords.device)
-            x = lfa(current_indices, self.KNN, x)
+            x, neighbor_idx = lfa(current_indices, self.KNN, x)
             x_stack.append(x)
             decimation_ratio *= d
-            x = x[:, :, :N // decimation_ratio]
+            pool_idx = neighbor_idx[:, :N // decimation_ratio]
+            x = self.random_sample(x, pool_idx)
 
         x = self.mlp(x)
 
@@ -237,6 +245,18 @@ class RandLANet(nn.Module):
             out = out[:, :, torch.argsort(permutation)]
 
         return out
+
+    @staticmethod
+    def random_sample(features, neighbor_idx):
+        point_features = features.squeeze(-1).transpose(1, 2)
+        batch_size = point_features.shape[0]
+        batch_idx = torch.arange(
+            batch_size, device=features.device
+        ).view(batch_size, 1, 1)
+
+        neighborhoods = point_features[batch_idx, neighbor_idx.long()]
+        pooled = neighborhoods.amax(dim=2)
+        return pooled.transpose(1, 2).unsqueeze(-1)
 
 
 def test_model():
