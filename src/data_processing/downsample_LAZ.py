@@ -1,14 +1,15 @@
 import numpy as np
 import laspy
+import hashlib
 import pickle
 from pathlib import Path
-from sklearn.neighbors import KDTree
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 import shutil
 
 
 # ------------------------------------------------------------------
-# 1. Load + normalise intensity
+# 1. Load + normalise intensity only
 # ------------------------------------------------------------------
 def load_and_normalise(las_path):
     las = laspy.read(las_path)
@@ -19,15 +20,14 @@ def load_and_normalise(las_path):
         np.asarray(las.z, dtype=np.float64),
     ], axis=1)
 
-    # centre whole cloud before casting
     xyz -= xyz.mean(axis=0)
-
     # NOW safe to cast — values are small, float32 precision is fine
     xyz = xyz.astype(np.float32)
 
     intensity = np.array(las.intensity, dtype=np.float32)
-    intensity = np.log1p(intensity) / np.log1p(intensity.max())
-    feats     = intensity[:, None]
+    intensity = intensity.reshape(-1, 1)
+    intensity = intensity / (intensity.max() + 1e-6) # normalise to [0, 1]
+    feats     = intensity
     labels    = np.array(las.classification, dtype=np.int32)
 
     xyz = xyz[labels!=0]
@@ -61,7 +61,7 @@ def voxel_subsample_iter(xyz, feats, labels, voxel_size=0.10):
     return xyz[chosen], feats[chosen], labels[chosen]
 
 def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
-    tqdm.write(f"  Starting voxel subsample: {xyz.shape[0], } pts...")
+    tqdm.write(f"  Starting voxel subsample: {xyz.shape[0]} pts...")
     keys     = np.floor(xyz / voxel_size).astype(np.int32)
     centers  = (keys + 0.5) * voxel_size
     dists_sq = np.sum((xyz - centers) ** 2, axis=1)
@@ -85,7 +85,7 @@ def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
     _, first   = np.unique(key_sorted, return_index=True)
     chosen     = order[first]
 
-    tqdm.write(f"  voxel subsample: {len(xyz):,} → {len(chosen):,} pts")
+    tqdm.write(f"  voxel subsample: {len(xyz)} → {len(chosen)} pts")
 
     return xyz[chosen], feats[chosen], labels[chosen]
 
@@ -102,7 +102,7 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
     y_starts = np.arange(mins[1], maxs[1], tile_size)
 
     total = len(x_starts) * len(y_starts)
-    with tqdm(total=total, desc="  Tiling", unit="cell", leave=False) as pbar:
+    with tqdm(total=total, desc="  Tiling", unit="cell", leave=False, position=1) as pbar:
         for i, x0 in enumerate(x_starts):
             for j, y0 in enumerate(y_starts):
                 pbar.update(1)
@@ -115,6 +115,10 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
                     continue
 
                 tile_labels = labels[mask]
+                if np.unique(tile_labels).size <= 3:
+                    pbar.set_postfix_str("skip — only three classes")
+                    continue
+
                 if set(tile_labels.tolist()).issubset(SKIP_CLASSES):
                     pbar.set_postfix_str("skip — only ground/tree")
                     continue
@@ -129,11 +133,15 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
 # ------------------------------------------------------------------
 # 4. Save tiles as .npy + precomputed KDTree as .pkl
 # ------------------------------------------------------------------
-def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
+def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
     cut_dir = Path(cut_dir)
     cut_dir.mkdir(parents=True, exist_ok=True)
 
     stem = Path(las_path).stem
+    source_id = hashlib.blake2b(
+        str(Path(las_path).resolve()).encode("utf-8"),
+        digest_size=8
+    ).hexdigest()
     tqdm.write(f"\n{'─'*60}")
     tqdm.write(f"Processing: {las_path}")
 
@@ -157,7 +165,9 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
     for tile_xyz, tile_feats, tile_labels, (ti, tj) in iter_tiles(
         xyz, feats, labels, tile_size
     ):
-        name = f"{stem}_tile_{ti:03d}_{tj:03d}"
+        name = f"{stem}_{source_id}_tile_{ti:03d}_{tj:03d}"
+        pcd_path = cut_dir / f"{name}.npy"
+        tree_path = cut_dir / f"{name}.pkl"
 
         tile_xyz = tile_xyz.astype(np.float32)
 
@@ -165,11 +175,12 @@ def save_tiles(las_path, cut_dir, voxel_size=0.10, tile_size=40.0):
             [tile_xyz, tile_feats, tile_labels[:, None].astype(np.float32)],
             axis=1
         )
-        np.save(cut_dir / f"{name}.npy", arr)
 
-        tree = KDTree(tile_xyz)
-        with open(cut_dir / f"{name}.pkl", "wb") as f:
-            pickle.dump(tree, f)
+        tree = cKDTree(tile_xyz, leafsize=40)
+        with pcd_path.open("xb") as f:
+            np.save(f, arr)
+        with tree_path.open("xb") as f:
+            pickle.dump(tree, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         saved += 1
 
@@ -216,17 +227,55 @@ def split_dataset(cut_dir, out_dir, train=0.7, val=0.15, test=0.15, seed=42):
     print(f"\nSplit complete: {counts}")
 
 
+def split_raw_files(las_root, split_dir, train=0.7, val=0.15, test=0.15, seed=42):
+    las_root = Path(las_root)
+    split_dir = Path(split_dir)
+
+    las_files = sorted(las_root.rglob("*.las"))
+    if not las_files:
+        raise RuntimeError(f"No LAS files found in {las_root}")
+
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(las_files))
+    n_train = int(len(las_files) * train)
+    n_val = int(len(las_files) * val)
+
+    split_indices = {
+        "train": order[:n_train],
+        "val": order[n_train:n_train + n_val],
+        "test": order[n_train + n_val:]
+    }
+
+    for split, indices in split_indices.items():
+        target_dir = split_dir / split
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for idx in indices:
+            src = las_files[idx]
+            dst = target_dir / src.name
+            shutil.copy(src, dst)
+
+    return split_dir
+
+
 # ------------------------------------------------------------------
 # Entry point
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    LAS_FILES  = sorted(Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/raw").glob("*.las"))
-    CUT_DIR    = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/cut")
-    SPLIT_DIR  = Path("/home/kalmary/Dokumenty/tree_data/FULL_LAZ/dist")
-    VOXEL_SIZE = 0.25
-    TILE_SIZE  = 40.0
+    LAS_ROOT   = Path("/Users/michalsiniarski/Documents/DATA/BRIK/DATASET/obrobione2")
+    CUT_DIR    = Path("/Users/michalsiniarski/Documents/DATA/BRIK/DATASET/split")
+    SPLIT_DIR  = Path("/Users/michalsiniarski/Documents/DATA/BRIK/DATASET/cut")
+    
+    VOXEL_SIZE = 0.10
+    TILE_SIZE  = 60.0
 
-    for las_path in tqdm(LAS_FILES, desc="Files", unit="file"):
-        save_tiles(las_path, CUT_DIR, VOXEL_SIZE, TILE_SIZE)
+    split_raw_files(LAS_ROOT, SPLIT_DIR)
 
-    split_dataset(CUT_DIR, SPLIT_DIR)
+    las_paths = []
+    for split in ("train", "val", "test"):
+        split_src = SPLIT_DIR / split
+        las_paths.extend(sorted(split_src.glob("*.las")))
+
+    with tqdm(total=len(las_paths), desc="Overall progress", unit="file") as overall_pbar:
+        for las_path in las_paths:
+            save_tiles(las_path, CUT_DIR / las_path.parent.name, VOXEL_SIZE, TILE_SIZE)
+            overall_pbar.update(1)

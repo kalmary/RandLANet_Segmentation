@@ -104,12 +104,11 @@ def get_factor_list(param_value_list: list[Union[float]]) -> list[Union[float]]:
     
 
 def generate_experiment_configs(training_config: dict, 
-                                model_configs_list: Sequence[dict],
-                                device_name: str = 'cpu') -> list[dict]:
+                                model_configs_list: Sequence[dict]) -> list[dict]:
     logger = logging.getLogger(__name__)
     logger.info(f'START: generate_experiment_config.')
     
-    device = torch.device('cuda') if (('cuda' in device_name.lower() or 'gpu' in device_name.lower()) and torch.cuda.is_available()) else torch.device('cpu')
+    device = torch.device('cuda')
     logger.info(f'Using device: {device}')
 
     dynamic_params = {}
@@ -171,7 +170,7 @@ def generate_experiment_configs(training_config: dict,
 
 
 
-def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0) -> list[dict]:
+def load_config(base_dir: Union[str, pth.Path], mode: int = 0) -> list[dict]:
 
     """
     Load configuration files and prepare experiment configurations for training.
@@ -218,8 +217,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
     assert model_configs_list != 0, "No models compiled. Check model_configs - most likely too big models are defined"
 
     if mode == 3:
-        device = torch.device('cuda') if (('cuda' in device_name.lower() or 'gpu' in device_name.lower()) and torch.cuda.is_available()) else torch.device('cpu')
-        training_config['device'] = device
+        training_config['device'] = torch.device('cuda')
         
         logger.info(f'Loaded device: {device}')
         logger.info(f'STOP: load_config. All files loaded.')
@@ -228,9 +226,10 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
 
         return [training_config, model_configs_list]
     else:
-        exp_configs = generate_experiment_configs(training_config, 
-                                            model_configs_list, 
-                                            device_name = device_name)
+        exp_configs = generate_experiment_configs(
+            training_config,
+            model_configs_list,
+        )
         
         logger.info(f'STOP: load_config. All files loaded.')
 
@@ -589,11 +588,11 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
     
     logger.info(f'STOP: optuna_based_training')
     
-def argparser():
+def argparser(args=None):
         
     """
     Parse command-line arguments for automated CNN training pipeline configuration.
-    Accepts model naming, computational device selection (CPU/CUDA/GPU), and optional test mode activation.
+    Accepts model naming and training mode selection.
     Returns parsed arguments with validation for device choices and formatted help text display.
     """
 
@@ -614,26 +613,13 @@ def argparser():
         )
     )
 
-    
-    # Flag definition
-    parser.add_argument(
-        '--device',
-        type=str,
-        default='cpu',
-        choices=['cpu', 'cuda', 'gpu'], # choice limit
-        help=(
-            "Device for tensor based computation.\n"
-            "Pick 'cpu' or 'cuda'/ 'gpu'.\n"
-        )
-    )
-
     parser.add_argument(
         '--mode',
         type=int,
         default=0,
         choices=[0, 1, 2, 3, 4], # choice limit
         help=(
-            "Device for tensor based computation.\n"
+            "Training mode.\n"
             'Pick:\n'
             '0: test\n'
             '1: single training\n'
@@ -643,7 +629,7 @@ def argparser():
         )
     )
 
-    return parser.parse_args()
+    return parser.parse_args(args)
 
 
 def main():
@@ -675,12 +661,13 @@ def main():
     logger.info(f"PROGRAM START: {args.model_name}")
 
 
-    device = args.device.lower()
     model_name = args.model_name
 
     base_path = pth.Path(__file__).parent
     if args.mode != 4:
-        exp_configs  = load_config(base_path, device, mode = args.mode)
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is required for training")
+        exp_configs = load_config(base_path, mode=args.mode)
 
     if args.mode == 0:
         test_case(exp_config=exp_configs[0])

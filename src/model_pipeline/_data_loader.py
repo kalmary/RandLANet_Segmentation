@@ -1,299 +1,263 @@
-import numpy as np
 import pickle
-import torch
 from pathlib import Path
-from torch.utils.data import IterableDataset, DataLoader
+
+import numpy as np
+import torch
+from scipy.spatial import cKDTree
+from torch.utils.data import DataLoader, IterableDataset
 
 
 class CustomDataset(IterableDataset):
-    """
-    DALES-style iterable dataset over pre-cut .npy tiles.
-    Each .npy tile has a paired .pkl KDTree built during preprocessing.
+    def __init__(
+        self,
+        data_dir,
+        num_points: int = 8192,
+        batch_size: int = 8,
+        shuffle: bool = True,
+        pos_weights: np.ndarray = None,
+        max_seen: int = 10,
+        query_workers: int = -1,
+        epoch: int = 0,
+    ):
+        self.files = sorted(Path(data_dir).glob("*.npy"))
+        self.num_points = num_points
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.max_seen = max_seen
+        self.query_workers = query_workers
+        self._epoch = epoch
+        self.class_targets = self._build_class_targets(pos_weights)
 
-    File format: (N, 5) — xyz(3) + intensity(1) + label(1)
+        if not self.files:
+            raise FileNotFoundError(f"No .npy files in {data_dir}")
+        if num_points < 2:
+            raise ValueError("num_points must be at least 2")
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        if not 1 <= max_seen <= np.iinfo(np.int8).max:
+            raise ValueError("max_seen must fit in int8")
+        if query_workers == 0 or query_workers < -1:
+            raise ValueError("query_workers must be -1 or a positive integer")
 
-    Output per batch:
-        xyz_feats : (B, num_points, 4)  — xyz + intensity
-        labels    : (B, num_points)     — class index, long
-
-    Possibility map:
-        - spatially aware: initialised from local class distribution on coarse grid
-        - common classes start just above coverage_thresh (rarely picked as centers)
-        - rare classes start at 0 (picked first, sampled heavily)
-        - epsilon controls how often common classes still get picked as centers
-        - gaussian decay on update: edge points stay hungry longer than center
-    """
-
-    def __init__(self, data_dir,
-                 num_points:            int        = 8192,
-                 batch_size:            int        = 8,
-                 buffer_size:           int        = 64,
-                 shuffle:               bool       = True,
-                 pos_weights:           np.ndarray = None,
-                 coverage_thresh:       float      = 0.5,
-                 epsilon:               float      = -0.005,
-                 grid_res:              float      = 2.5,
-                 gaussian_sigma_factor: float      = 2.,
-                 epoch:                 int        = 0):
-        """
-        coverage_thresh:       possibility threshold — point satisfied when poss >= this
-        epsilon:               how far above coverage_thresh common classes start
-                               larger = common classes sampled less often
-        grid_res:              spatial grid cell size (metres) for regional class density
-        gaussian_sigma_factor: controls width of gaussian update bell curve
-                               larger = narrower bell = more edge revisits
-        """
-        self.files                 = sorted(Path(data_dir).glob("*.npy"))
-        self.num_points            = num_points
-        self.batch_size            = batch_size
-        self.buffer_size           = buffer_size
-        self.shuffle               = shuffle
-        self.pos_weights           = pos_weights
-        self.coverage_thresh       = coverage_thresh
-        self.epsilon               = epsilon
-        self.grid_res              = grid_res
-        self.gaussian_sigma_factor = gaussian_sigma_factor
-        self._epoch                = epoch
-
-        assert len(self.files) > 0, f"No .npy files in {data_dir}"
-        assert buffer_size >= batch_size, \
-            f"buffer_size ({buffer_size}) must be >= batch_size ({batch_size})"
-
-        missing = [f for f in self.files if not f.with_suffix(".pkl").exists()]
+        missing = [
+            path
+            for path in self.files
+            if not path.with_suffix(".pkl").exists()
+        ]
         if missing:
             raise FileNotFoundError(
-                f"Missing KDTree .pkl for {len(missing)} tiles: {missing[:3]} ..."
+                f"Missing matching .pkl trees for: {missing[:3]}"
             )
 
-    def set_epoch(self, epoch: int):
-        self._epoch = epoch
+    def _build_class_targets(self, pos_weights):
+        if pos_weights is None:
+            return None
 
-    # ------------------------------------------------------------------
-    # possibility map
-    # ------------------------------------------------------------------
-    def _build_possibility(self, xyz: np.ndarray, labels: np.ndarray) -> np.ndarray:
-        xyz    = np.asarray(xyz,    dtype=np.float32)
-        labels = np.asarray(labels, dtype=np.int32)
-        n      = len(labels)
+        weights = np.asarray(pos_weights, dtype=np.float64).reshape(-1)
+        if weights.size == 0:
+            raise ValueError("pos_weights cannot be empty")
+        if (
+            not np.all(np.isfinite(weights))
+            or np.any(weights < 0)
+            or np.any(weights > 1)
+        ):
+            raise ValueError("pos_weights must be finite and within [0, 1]")
 
-        if self.pos_weights is None:
-            return np.random.uniform(0, 1, n).astype(np.float32)
+        positive = weights > 0
+        if not np.any(positive):
+            raise ValueError("pos_weights must contain a positive value")
 
-        w = self.pos_weights / (self.pos_weights.max() + 1e-6)  # rare=1, common≈0
+        targets = np.ones_like(weights, dtype=np.int8)
+        scaled = weights[positive] * self.max_seen
+        targets[positive] = np.clip(
+            np.floor(scaled + 0.5),
+            1,
+            self.max_seen,
+        ).astype(np.int8)
+        return targets
 
-        # coarse spatial grid — regional class density
-        gx = np.floor(xyz[:, 0] / self.grid_res).astype(np.int64)
-        gy = np.floor(xyz[:, 1] / self.grid_res).astype(np.int64)
+    def _load_file(self, path):
+        data = np.load(path)
+        if data.ndim != 2 or data.shape[1] != 5:
+            raise ValueError(f"Expected (N, 5) data in {path}, got {data.shape}")
 
-        gy_range = int(gy.max() - gy.min() + 1)
-        cell_enc = (gx - gx.min()) * gy_range + (gy - gy.min())
-
-        _, inverse = np.unique(cell_enc, return_inverse=True)
-        n_cells    = _.shape[0]
-
-        point_w      = w[labels].astype(np.float64)
-        cell_w_sum   = np.bincount(inverse, weights=point_w, minlength=n_cells).astype(np.float32)
-        cell_w_count = np.bincount(inverse,                  minlength=n_cells).astype(np.float32)
-        cell_w       = cell_w_sum / (cell_w_count + 1e-6)
-
-        point_cell_w = cell_w[inverse]
-        point_cls_w  = point_w.astype(np.float32)
-        combined_w   = 0.5 * point_cell_w + 0.5 * point_cls_w  # (N,) in [0, 1]
-
-        # rare   (combined_w=1.0) → poss = 0.0
-        # common (combined_w=0.0) → poss = coverage_thresh + epsilon  (just above thresh)
-        poss  = (self.coverage_thresh + self.epsilon) * (1.0 - combined_w)
-        poss += np.random.uniform(0, 0.05, n)   # jitter — common classes occasionally dip below thresh
-        return poss.astype(np.float32)
-
-    # ------------------------------------------------------------------
-    # core: one file
-    # ------------------------------------------------------------------
-    def _iter_file(self, npy_path: Path):
-        data   = np.load(npy_path)
-        xyz    = data[:, :3].astype(np.float32)
-        feats  = data[:, 3:4].astype(np.float32)
+        xyz = np.ascontiguousarray(data[:, :3], dtype=np.float32)
+        feats = np.ascontiguousarray(data[:, 3:4], dtype=np.float32)
         labels = data[:, 4].astype(np.int32)
         del data
 
-        with open(npy_path.with_suffix(".pkl"), "rb") as f:
-            kdtree = pickle.load(f)
+        with path.with_suffix(".pkl").open("rb") as file:
+            tree = pickle.load(file)
 
-        poss  = self._build_possibility(xyz, labels)
-        gap   = poss - self.coverage_thresh   # single uniform threshold
-
-        while gap.min() < 0:
-            center_idx   = int(np.argmin(gap))
-            center       = xyz[center_idx]
-
-            neighbor_idx = kdtree.query(
-                center[None], k=self.num_points, return_distance=False
-            )[0].astype(np.int32)
-
-            dists = np.linalg.norm(xyz[neighbor_idx] - center, axis=1)
-            sigma = dists.max() / self.gaussian_sigma_factor
-            delta = np.exp(-(dists ** 2) / (2 * sigma ** 2 + 1e-6))
-
-            poss[neighbor_idx] += delta
-            gap[neighbor_idx]  += delta
-
-            xyz_feats = np.concatenate(
-                [xyz[neighbor_idx] - center, feats[neighbor_idx]], axis=1
+        if not isinstance(tree, cKDTree):
+            raise TypeError(f"Expected cKDTree in {path.with_suffix('.pkl')}")
+        if tree.n != len(xyz):
+            raise ValueError(
+                f"Point/tree size mismatch for {path.name}: "
+                f"{len(xyz)} points, {tree.n} tree entries"
             )
-            yield xyz_feats, labels[neighbor_idx].astype(np.int64)
+        if len(xyz) < self.num_points:
+            raise ValueError(
+                f"{path.name} contains {len(xyz)} points, "
+                f"but num_points is {self.num_points}"
+            )
+        if labels.size and labels.min() < 0:
+            raise ValueError(f"Negative labels found in {path}")
 
-        del xyz, feats, labels, kdtree, poss, gap
+        return xyz, feats, labels, tree
 
-    # ------------------------------------------------------------------
-    # buffer → batches
-    # ------------------------------------------------------------------
-    def _iter_batched(self, file_order, rng):
-        buffer = []
+    def _point_targets(self, labels):
+        if self.class_targets is None:
+            return np.full(
+                (len(labels), 1),
+                self.max_seen,
+                dtype=np.int8,
+            )
 
-        def drain(flush=False):
-            if self.shuffle:
-                rng.shuffle(buffer)
+        if labels.size and labels.max() >= len(self.class_targets):
+            raise ValueError(
+                f"Label {labels.max()} has no corresponding class weight"
+            )
+        return self.class_targets[labels, None]
 
-            while len(buffer) >= self.batch_size:
-                batch       = buffer[:self.batch_size]
-                del buffer[:self.batch_size]
-                xyz_feats_b = np.stack([s[0] for s in batch])
-                labels_b    = np.stack([s[1] for s in batch])
+    def _query_neighbors(self, tree, xyz, center_indices):
+        centers = xyz[center_indices]
+        _, queried = tree.query(
+            centers,
+            k=self.num_points,
+            workers=self.query_workers,
+        )
 
-                if self.shuffle:
-                    for b in range(self.batch_size):
-                        perm           = rng.permutation(self.num_points)
-                        xyz_feats_b[b] = xyz_feats_b[b][perm]
-                        labels_b[b]    = labels_b[b][perm]
+        queried = np.asarray(queried, dtype=np.int64)
+        if queried.ndim == 1:
+            queried = queried[None, :]
 
-                yield (
-                    torch.from_numpy(xyz_feats_b),           # (B, N, 4)
-                    torch.from_numpy(labels_b).long(),        # (B, N)
-                )
+        neighbors = np.empty_like(queried)
+        neighbors[:, 0] = center_indices
 
-            if flush and buffer:
-                batch = buffer[:]
-                del buffer[:]
-                yield (
-                    torch.from_numpy(np.stack([s[0] for s in batch])),
-                    torch.from_numpy(np.stack([s[1] for s in batch])).long(),
-                )
+        for row, center_idx in enumerate(center_indices):
+            other = queried[row][queried[row] != center_idx]
+            neighbors[row, 1:] = other[:self.num_points - 1]
 
-        for file_idx in file_order:
-            for sample in self._iter_file(self.files[file_idx]):
-                buffer.append(sample)
-                if len(buffer) >= self.buffer_size:
-                    yield from drain()
+        return neighbors
 
-        yield from drain(flush=True)
+    @staticmethod
+    def _update_seen(seen, neighbor_indices):
+        indices, increments = np.unique(
+            neighbor_indices.reshape(-1),
+            return_counts=True,
+        )
+        values = seen[indices, 0].astype(np.int32) + increments
+        seen[indices, 0] = np.minimum(
+            values,
+            np.iinfo(np.int8).max,
+        ).astype(np.int8)
 
-    # ------------------------------------------------------------------
-    # __iter__
-    # ------------------------------------------------------------------
+    def _iter_file(self, path, rng):
+        xyz, feats, labels, tree = self._load_file(path)
+        targets = self._point_targets(labels)
+        seen = np.zeros((len(xyz), 1), dtype=np.int8)
+
+        while True:
+            remaining = np.flatnonzero(seen[:, 0] < targets[:, 0])
+            if remaining.size == 0:
+                break
+
+            center_count = min(self.batch_size, remaining.size)
+            center_indices = rng.choice(
+                remaining,
+                size=center_count,
+                replace=False,
+            )
+            neighbor_indices = self._query_neighbors(
+                tree,
+                xyz,
+                center_indices,
+            )
+            self._update_seen(seen, neighbor_indices)
+
+            centers = xyz[center_indices, None, :]
+            batch_xyz = xyz[neighbor_indices] - centers
+            batch_feats = feats[neighbor_indices]
+            batch = np.concatenate((batch_xyz, batch_feats), axis=2)
+            batch_labels = labels[neighbor_indices].astype(
+                np.int64,
+                copy=False,
+            )
+
+            yield (
+                torch.from_numpy(batch),
+                torch.from_numpy(batch_labels),
+            )
+
+        return seen
+
     def __iter__(self):
-        rng   = np.random.default_rng(self._epoch)
-        order = list(range(len(self.files)))
-
-        if self.shuffle:
-            order = rng.permutation(order).tolist()
-
         worker_info = torch.utils.data.get_worker_info()
-        if worker_info is not None:
-            order = order[worker_info.id :: worker_info.num_workers]
+        if worker_info is not None and worker_info.num_workers != 1:
+            raise RuntimeError(
+                "CustomDataset requires exactly one DataLoader worker; "
+                "query_workers controls parallel cKDTree queries"
+            )
 
-        yield from self._iter_batched(order, rng)
+        rng = np.random.default_rng(self._epoch)
+        self._epoch += 1
+        order = np.arange(len(self.files))
+        if self.shuffle:
+            rng.shuffle(order)
+
+        for file_idx in order:
+            yield from self._iter_file(self.files[file_idx], rng)
 
 
-# ------------------------------------------------------------------
-# helpers
-# ------------------------------------------------------------------
-def compute_pos_weights(data_dir, num_classes: int,
-                        power: float = 0.25) -> np.ndarray:
-    """
-    Inverse frequency weights with power dampening.
-    power=1.0 → raw inverse freq
-    power=0.5 → sqrt dampening
-    power=0.25 → fourth root (default, mild compression)
-    power=0.0 → uniform
-    """
+def compute_pos_weights(
+    data_dir,
+    num_classes: int,
+    power: float = 0.25,
+) -> np.ndarray:
     counts = np.zeros(num_classes, dtype=np.int64)
+
     for path in sorted(Path(data_dir).glob("*.npy")):
-        labels  = np.load(path)[:, 4].astype(np.int32)
-        counts += np.bincount(labels, minlength=num_classes)
+        labels = np.load(path, mmap_mode="r")[:, 4].astype(np.int32)
+        file_counts = np.bincount(labels, minlength=num_classes)
+        if len(file_counts) != num_classes:
+            raise ValueError(f"Label outside configured classes in {path}")
+        counts += file_counts
 
-    weights              = (1.0 / (counts + 1e-6)) ** power
+    weights = (1.0 / (counts + 1e-6)) ** power
     weights[counts == 0] = 0.0
-    weights              = (weights / weights.max()).astype(np.float32)
-    return weights
+    if weights.max() > 0:
+        weights /= weights.max()
+    return weights.astype(np.float32)
 
 
-def make_loader(data_dir,
-                num_points:            int        = 8192,
-                batch_size:            int        = 8,
-                buffer_size:           int        = 64,
-                num_workers:           int        = 4,
-                shuffle:               bool       = True,
-                pos_weights:           np.ndarray = None,
-                coverage_thresh:       float      = 0.5,
-                epsilon:               float      = 0.05,
-                grid_res:              float      = 5.0,
-                gaussian_sigma_factor: float      = 3.0,
-                epoch:                 int        = 0) -> tuple[DataLoader, CustomDataset]:
-
-    ds = CustomDataset(
-        data_dir               = data_dir,
-        num_points             = num_points,
-        batch_size             = batch_size,
-        buffer_size            = buffer_size,
-        shuffle                = shuffle,
-        pos_weights            = pos_weights,
-        coverage_thresh        = coverage_thresh,
-        epsilon                = epsilon,
-        grid_res               = grid_res,
-        gaussian_sigma_factor  = gaussian_sigma_factor,
-        epoch                  = epoch,
+def make_loader(
+    data_dir,
+    num_points: int = 8192,
+    batch_size: int = 8,
+    query_workers: int = -1,
+    shuffle: bool = True,
+    pos_weights: np.ndarray = None,
+    max_seen: int = 10,
+    epoch: int = 0,
+) -> tuple[DataLoader, CustomDataset]:
+    dataset = CustomDataset(
+        data_dir=data_dir,
+        num_points=num_points,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        pos_weights=pos_weights,
+        max_seen=max_seen,
+        query_workers=query_workers,
+        epoch=epoch,
     )
     loader = DataLoader(
-        ds,
-        num_workers        = num_workers,
-        pin_memory         = True,
-        persistent_workers = False,
+        dataset,
+        batch_size=None,
+        num_workers=1,
+        persistent_workers=True,
+        prefetch_factor=2,
+        pin_memory=False,
+        multiprocessing_context="spawn",
     )
-    return loader, ds
-
-
-# ------------------------------------------------------------------
-# usage
-# ------------------------------------------------------------------
-if __name__ == "__main__":
-    TRAIN_DIR    = "data/split/train"
-    NUM_CLASSES  = 10
-    WEIGHTS_PATH = Path("pos_weights.npy")
-
-    if not WEIGHTS_PATH.exists():
-        loader, ds = make_loader(TRAIN_DIR, shuffle=False)
-        for epoch in range(3):
-            ds.set_epoch(epoch)
-            for xyz_feats, labels in loader:
-                pass
-
-        pos_weights = compute_pos_weights(TRAIN_DIR, NUM_CLASSES)
-        np.save(WEIGHTS_PATH, pos_weights)
-        print("pos_weights:", pos_weights)
-
-    pos_weights = np.load(WEIGHTS_PATH)
-    loader, ds  = make_loader(
-        TRAIN_DIR,
-        pos_weights           = pos_weights,
-        shuffle               = True,
-        epsilon               = 0.05,
-        grid_res              = 5.0,
-        gaussian_sigma_factor = 3.0,
-    )
-
-    for epoch in range(100):
-        ds.set_epoch(epoch)
-        for xyz_feats, labels in loader:
-            # xyz_feats : (B, num_points, 4)
-            # labels    : (B, num_points)
-            pass
+    return loader, dataset
