@@ -57,7 +57,6 @@ def test_inference_collects_outputs_before_metrics(monkeypatch):
         "num_points": 2,
         "batch_size": 1,
         "query_workers": 3,
-        "max_seen": 4,
         "device": torch.device("cpu"),
     }
     weights = torch.tensor([0.5, 1.0])
@@ -81,17 +80,12 @@ def test_inference_collects_outputs_before_metrics(monkeypatch):
     assert torch.equal(result_weights, weights)
     assert len(loader_calls) == 1
     loader_args = loader_calls[0]
-    np.testing.assert_array_equal(
-        loader_args.pop("pos_weights"),
-        np.array([0.5, 1.0], dtype=np.float32),
-    )
     assert loader_args == {
         "data_dir": "unused",
         "num_points": 2,
         "batch_size": 1,
         "query_workers": 3,
         "shuffle": False,
-        "max_seen": 4,
     }
 
 
@@ -164,7 +158,7 @@ def test_metrics_use_all_points_and_supplied_weights():
     )
 
     assert metrics["accuracy"] == pytest.approx(0.75)
-    assert metrics["weighted_accuracy"] == pytest.approx(0.5)
+    assert "weighted_accuracy" not in metrics
     assert metrics["miou"] == pytest.approx(7.0 / 12.0)
     np.testing.assert_allclose(metrics["class_iou"], [2.0 / 3.0, 0.5])
     assert metrics["probabilities"].shape == (4, 2)
@@ -203,5 +197,5 @@ def test_frontend_finalizes_metrics_then_creates_all_outputs(tmp_path, monkeypat
     assert plot_dir.is_dir()
     assert PlotRecorder.calls == ["confusion", "precision_recall", "roc"]
     assert "Accuracy:" in report["additional_info"]
-    assert "Weighted accuracy:" in report["additional_info"]
+    assert "Weighted accuracy:" not in report["additional_info"]
     assert "mIoU:" in report["additional_info"]

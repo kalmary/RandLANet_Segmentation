@@ -347,9 +347,7 @@ class SegmentClass:
         normalized_intensity = intensity.astype(np.float32, copy=True)
         maximum_intensity = normalized_intensity.max()
         if maximum_intensity > 0:
-            normalized_intensity = (
-                np.log1p(normalized_intensity) / np.log1p(maximum_intensity)
-            )
+            normalized_intensity /= maximum_intensity
         else:
             normalized_intensity.fill(0)
 

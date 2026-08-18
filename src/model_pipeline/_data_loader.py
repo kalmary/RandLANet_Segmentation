@@ -14,8 +14,6 @@ class CustomDataset(IterableDataset):
         num_points: int = 8192,
         batch_size: int = 8,
         shuffle: bool = True,
-        pos_weights: np.ndarray = None,
-        max_seen: int = 10,
         query_workers: int = -1,
         epoch: int = 0,
     ):
@@ -23,10 +21,8 @@ class CustomDataset(IterableDataset):
         self.num_points = num_points
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.max_seen = max_seen
         self.query_workers = query_workers
         self._epoch = epoch
-        self.class_targets = self._build_class_targets(pos_weights)
 
         if not self.files:
             raise FileNotFoundError(f"No .npy files in {data_dir}")
@@ -34,8 +30,6 @@ class CustomDataset(IterableDataset):
             raise ValueError("num_points must be at least 2")
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
-        if not 1 <= max_seen <= np.iinfo(np.int8).max:
-            raise ValueError("max_seen must fit in int8")
         if query_workers == 0 or query_workers < -1:
             raise ValueError("query_workers must be -1 or a positive integer")
 
@@ -49,32 +43,6 @@ class CustomDataset(IterableDataset):
                 f"Missing matching .pkl trees for: {missing[:3]}"
             )
 
-    def _build_class_targets(self, pos_weights):
-        if pos_weights is None:
-            return None
-
-        weights = np.asarray(pos_weights, dtype=np.float64).reshape(-1)
-        if weights.size == 0:
-            raise ValueError("pos_weights cannot be empty")
-        if (
-            not np.all(np.isfinite(weights))
-            or np.any(weights < 0)
-            or np.any(weights > 1)
-        ):
-            raise ValueError("pos_weights must be finite and within [0, 1]")
-
-        positive = weights > 0
-        if not np.any(positive):
-            raise ValueError("pos_weights must contain a positive value")
-
-        targets = np.ones_like(weights, dtype=np.int8)
-        scaled = weights[positive] * self.max_seen
-        targets[positive] = np.clip(
-            np.floor(scaled + 0.5),
-            1,
-            self.max_seen,
-        ).astype(np.int8)
-        return targets
 
     def _load_file(self, path):
         data = np.load(path)
@@ -106,19 +74,6 @@ class CustomDataset(IterableDataset):
 
         return xyz, feats, labels, tree
 
-    def _point_targets(self, labels):
-        if self.class_targets is None:
-            return np.full(
-                (len(labels), 1),
-                self.max_seen,
-                dtype=np.int8,
-            )
-
-        if labels.size and labels.max() >= len(self.class_targets):
-            raise ValueError(
-                f"Label {labels.max()} has no corresponding class weight"
-            )
-        return self.class_targets[labels, None]
 
     def _query_neighbors(self, tree, xyz, center_indices):
         centers = xyz[center_indices]
@@ -142,39 +97,53 @@ class CustomDataset(IterableDataset):
         return neighbors
 
     @staticmethod
-    def _update_seen(seen, neighbor_indices):
-        indices, increments = np.unique(
-            neighbor_indices.reshape(-1),
-            return_counts=True,
+    def _update_possibilities(
+        possibilities,
+        xyz,
+        center_indices,
+        neighbor_indices,
+    ):
+        neighborhoods = xyz[neighbor_indices]
+        centers = xyz[center_indices, None, :]
+        squared_distances = np.sum(
+            (neighborhoods - centers) ** 2,
+            axis=2,
         )
-        values = seen[indices, 0].astype(np.int32) + increments
-        seen[indices, 0] = np.minimum(
-            values,
-            np.iinfo(np.int8).max,
-        ).astype(np.int8)
+        max_distances = squared_distances.max(axis=1, keepdims=True)
+        normalized = np.divide(
+            squared_distances,
+            max_distances,
+            out=np.zeros_like(squared_distances),
+            where=max_distances > 0,
+        )
+        deltas = (1.0 - normalized) ** 2
+        np.add.at(possibilities, neighbor_indices, deltas)
 
     def _iter_file(self, path, rng):
         xyz, feats, labels, tree = self._load_file(path)
-        targets = self._point_targets(labels)
-        seen = np.zeros((len(xyz), 1), dtype=np.int8)
+        possibilities = rng.random(len(xyz)) * 1e-3
+        covered = np.zeros(len(xyz), dtype=bool)
 
-        while True:
-            remaining = np.flatnonzero(seen[:, 0] < targets[:, 0])
-            if remaining.size == 0:
-                break
-
+        while not np.all(covered):
+            remaining = np.flatnonzero(~covered)
             center_count = min(self.batch_size, remaining.size)
-            center_indices = rng.choice(
-                remaining,
-                size=center_count,
-                replace=False,
+            ranked = np.argsort(
+                possibilities[remaining],
+                kind="stable",
             )
+            center_indices = remaining[ranked[:center_count]]
             neighbor_indices = self._query_neighbors(
                 tree,
                 xyz,
                 center_indices,
             )
-            self._update_seen(seen, neighbor_indices)
+            self._update_possibilities(
+                possibilities,
+                xyz,
+                center_indices,
+                neighbor_indices,
+            )
+            covered[neighbor_indices] = True
 
             centers = xyz[center_indices, None, :]
             batch_xyz = xyz[neighbor_indices] - centers
@@ -190,7 +159,7 @@ class CustomDataset(IterableDataset):
                 torch.from_numpy(batch_labels),
             )
 
-        return seen
+        return covered
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -200,8 +169,11 @@ class CustomDataset(IterableDataset):
                 "query_workers controls parallel cKDTree queries"
             )
 
-        rng = np.random.default_rng(self._epoch)
-        self._epoch += 1
+        if worker_info is None:
+            rng = np.random.default_rng(self._epoch)
+            self._epoch += 1
+        else:
+            rng = np.random.default_rng(worker_info.seed)
         order = np.arange(len(self.files))
         if self.shuffle:
             rng.shuffle(order)
@@ -210,35 +182,12 @@ class CustomDataset(IterableDataset):
             yield from self._iter_file(self.files[file_idx], rng)
 
 
-def compute_pos_weights(
-    data_dir,
-    num_classes: int,
-    power: float = 0.25,
-) -> np.ndarray:
-    counts = np.zeros(num_classes, dtype=np.int64)
-
-    for path in sorted(Path(data_dir).glob("*.npy")):
-        labels = np.load(path, mmap_mode="r")[:, 4].astype(np.int32)
-        file_counts = np.bincount(labels, minlength=num_classes)
-        if len(file_counts) != num_classes:
-            raise ValueError(f"Label outside configured classes in {path}")
-        counts += file_counts
-
-    weights = (1.0 / (counts + 1e-6)) ** power
-    weights[counts == 0] = 0.0
-    if weights.max() > 0:
-        weights /= weights.max()
-    return weights.astype(np.float32)
-
-
 def make_loader(
     data_dir,
     num_points: int = 8192,
     batch_size: int = 8,
     query_workers: int = -1,
     shuffle: bool = True,
-    pos_weights: np.ndarray = None,
-    max_seen: int = 10,
     epoch: int = 0,
 ) -> tuple[DataLoader, CustomDataset]:
     dataset = CustomDataset(
@@ -246,8 +195,6 @@ def make_loader(
         num_points=num_points,
         batch_size=batch_size,
         shuffle=shuffle,
-        pos_weights=pos_weights,
-        max_seen=max_seen,
         query_workers=query_workers,
         epoch=epoch,
     )
@@ -255,7 +202,7 @@ def make_loader(
         dataset,
         batch_size=None,
         num_workers=1,
-        persistent_workers=True,
+        persistent_workers=False,
         prefetch_factor=2,
         pin_memory=False,
         multiprocessing_context="spawn",

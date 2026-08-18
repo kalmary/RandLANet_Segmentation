@@ -165,14 +165,17 @@ def test_segment_pcd_returns_labels_for_original_dense_points(
         'voxel_subsample_vectorized',
         subsample,
     )
-    monkeypatch.setattr(
-        segmenter,
-        '_segment_subsampled',
-        lambda *_: np.array([1, 0], dtype=np.int8),
-    )
+    captured = {}
+
+    def segment_subsampled(subsampled_points, subsampled_intensity):
+        captured['intensity'] = subsampled_intensity.copy()
+        return np.array([1, 0], dtype=np.int8)
+
+    monkeypatch.setattr(segmenter, '_segment_subsampled', segment_subsampled)
 
     labels = segmenter.segment_pcd(points, intensity)
 
+    np.testing.assert_allclose(captured['intensity'], [0.0, 0.5])
     np.testing.assert_array_equal(labels, [1, 1, 0, 0])
     np.testing.assert_array_equal(points, original_points)
     assert labels.dtype == np.int8

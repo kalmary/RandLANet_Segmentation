@@ -65,57 +65,45 @@ def make_dataset():
     return _make_dataset
 
 
-def test_class_weights_set_required_views(tmp_path, save_tile, make_dataset):
-    save_tile(tmp_path)
-
-    dataset = make_dataset(
-        tmp_path,
-        pos_weights=np.array(
-            [0.4, 0.6, 1.0],
-            dtype=np.float32,
-        ),
-        max_seen=5,
-    )
-    np.testing.assert_array_equal(
-        dataset.class_targets,
-        np.array([2, 3, 5], dtype=np.int8),
+def test_possibility_updates_use_randlanet_distance_deltas():
+    possibilities = np.zeros(3, dtype=np.float64)
+    xyz = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+        dtype=np.float32,
     )
 
-    equal_dataset = make_dataset(
-        tmp_path,
-        pos_weights=np.ones(3, dtype=np.float32),
-        max_seen=5,
-    )
-    np.testing.assert_array_equal(
-        equal_dataset.class_targets,
-        np.array([5, 5, 5], dtype=np.int8),
+    _data_loader.CustomDataset._update_possibilities(
+        possibilities,
+        xyz,
+        center_indices=np.array([0]),
+        neighbor_indices=np.array([[0, 1, 2]]),
     )
 
+    np.testing.assert_allclose(possibilities, [1.0, 0.5625, 0.0])
 
-def test_sampling_reaches_each_points_required_views(
+
+def test_sampling_covers_every_point_once_or_more(
     tmp_path,
     sample_data,
     save_tile,
     make_dataset,
 ):
     path = save_tile(tmp_path)
-    dataset = make_dataset(
-        tmp_path,
-        pos_weights=np.array([0.1, 1.0], dtype=np.float32),
-        max_seen=4,
-    )
+    dataset = make_dataset(tmp_path)
 
-    iterator = dataset._iter_file(
-        path,
-        np.random.default_rng(4),
-    )
+    class FixedRng:
+        @staticmethod
+        def random(size):
+            return np.arange(size, 0, -1, dtype=np.float64)
+
+    iterator = dataset._iter_file(path, FixedRng())
     batches = []
 
     while True:
         try:
             batch, labels = next(iterator)
         except StopIteration as result:
-            seen = result.value
+            covered = result.value
             break
 
         batches.append((batch, labels))
@@ -127,10 +115,14 @@ def test_sampling_reaches_each_points_required_views(
         )
 
     assert batches
-    targets = dataset._point_targets(sample_data.labels)
-    assert np.all(seen >= targets)
-    assert seen.dtype == np.int8
-    assert seen.shape == (len(sample_data.xyz), 1)
+    assert len(batches) <= int(np.ceil(len(sample_data.xyz) / 3))
+    assert covered.dtype == np.bool_
+    assert covered.shape == (len(sample_data.xyz),)
+    assert np.all(covered)
+    np.testing.assert_array_equal(
+        batches[0][0][:, 0, 3].numpy(),
+        sample_data.feats[[23, 22, 21], 0],
+    )
 
 
 def test_torch_workers_are_rejected(
@@ -140,7 +132,7 @@ def test_torch_workers_are_rejected(
     monkeypatch,
 ):
     save_tile(tmp_path)
-    dataset = make_dataset(tmp_path, max_seen=1)
+    dataset = make_dataset(tmp_path)
     monkeypatch.setattr(
         "torch.utils.data.get_worker_info",
         lambda: SimpleNamespace(num_workers=2),
@@ -150,7 +142,34 @@ def test_torch_workers_are_rejected(
         next(iter(dataset))
 
 
-def test_make_loader_uses_one_persistent_producer(tmp_path, save_tile):
+def test_worker_rng_uses_worker_seed(
+    tmp_path,
+    save_tile,
+    make_dataset,
+    monkeypatch,
+):
+    save_tile(tmp_path)
+    dataset = make_dataset(tmp_path)
+    worker_info = SimpleNamespace(num_workers=1, seed=101)
+    monkeypatch.setattr(
+        "torch.utils.data.get_worker_info",
+        lambda: worker_info,
+    )
+
+    def sample_rng(_path, rng):
+        yield rng.random()
+
+    monkeypatch.setattr(dataset, "_iter_file", sample_rng)
+    first = list(dataset)
+    worker_info.seed = 102
+    second = list(dataset)
+
+    assert first == [np.random.default_rng(101).random()]
+    assert second == [np.random.default_rng(102).random()]
+    assert first != second
+
+
+def test_make_loader_uses_one_nonpersistent_producer(tmp_path, save_tile):
     save_tile(tmp_path)
 
     loader, dataset = _data_loader.make_loader(
@@ -159,27 +178,13 @@ def test_make_loader_uses_one_persistent_producer(tmp_path, save_tile):
         batch_size=3,
         query_workers=2,
         shuffle=False,
-        pos_weights=np.ones(2, dtype=np.float32),
-        max_seen=1,
     )
 
     assert loader.num_workers == 1
-    assert loader.persistent_workers
+    assert not loader.persistent_workers
     assert loader.prefetch_factor == 2
     assert not loader.pin_memory
     assert dataset.query_workers == 2
-
-    first_epoch = list(loader)
-    second_epoch = list(loader)
-
-    batch, labels = first_epoch[0]
-    assert batch.shape == (3, 8, 4)
-    assert labels.shape == (3, 8)
-
-    first_centers = np.concatenate(
-        [batch[:, 0, 3].numpy() for batch, _ in first_epoch]
-    )
-    second_centers = np.concatenate(
-        [batch[:, 0, 3].numpy() for batch, _ in second_epoch]
-    )
-    assert not np.array_equal(first_centers, second_centers)
+    context = loader.multiprocessing_context
+    assert context is not None
+    assert context.get_start_method() == "spawn"
