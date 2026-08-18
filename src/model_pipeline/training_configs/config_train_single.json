@@ -10,8 +10,7 @@
     "batch_size": 6,
     "num_points": 8192,
     "num_neighbors": 16,
-    "max_seen": 3,
-    "query_workers": 7,
+    "query_workers": 12,
 
     "epochs": 100,
     "focal_loss_gamma": 1.0,
