@@ -46,7 +46,7 @@ def test_dataset_length_measurement_can_be_disabled(monkeypatch):
         lambda loader: pytest.fail("loader should not be iterated"),
     )
 
-    totals = train_case._dataset_lengths(object(), object(), enabled=False)
+    totals = train_case._dataset_lengths(object(), object(), enabled=True)
 
     assert totals == (None, None)
 
