@@ -171,6 +171,12 @@ Available flags:
 - ``output_path`` - optional output directory. Without it, each processed file is saved beside its source,
 - ``verbose`` - display processing progress.
 
+Each successful file is appended to `processed_files.txt` as
+`original/path -> processed/path`, while failed source paths are appended to
+`error_files.txt`. Paths are stored with POSIX separators. Files already listed
+in `processed_files.txt` are skipped on later runs, regardless of whether they
+also appear in `error_files.txt`.
+
 If more customizable approach is necessary/ point clouds are preloaded, you can also use just segmentation processing parts:
 ```python
 from array_processing import SegmentClass

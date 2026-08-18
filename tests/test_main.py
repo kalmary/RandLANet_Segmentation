@@ -1,11 +1,9 @@
 import pathlib
 import sys
-import tempfile
-import unittest
-from unittest.mock import patch
 
 import laspy
 import numpy as np
+import pytest
 import torch
 
 
@@ -28,7 +26,7 @@ class FixedSegmenter:
 
 def write_las(path: pathlib.Path, point_count: int = 4):
     path.parent.mkdir(parents=True, exist_ok=True)
-    header = laspy.LasHeader(point_format=3, version='1.2')
+    header = laspy.LasHeader(point_format=3, version="1.2")
     cloud = laspy.LasData(header)
     cloud.x = np.arange(point_count)
     cloud.y = np.arange(point_count) + 1
@@ -38,95 +36,157 @@ def write_las(path: pathlib.Path, point_count: int = 4):
     cloud.write(path)
 
 
-class MainTests(unittest.TestCase):
-    def setUp(self):
-        FixedSegmenter.instances = []
-
-    def test_parser_accepts_only_processing_arguments(self):
-        with tempfile.TemporaryDirectory() as directory:
-            input_file = pathlib.Path(directory) / 'cloud.las'
-            write_las(input_file)
-
-            args = main.argparser([
-                '--model_name', 'RandLANet_1',
-                '--verbose',
-                '--device', 'cpu',
-                '--input_path', str(input_file),
-                '--output_path', str(pathlib.Path(directory) / 'output'),
-            ])
-
-        self.assertEqual(args.model_name, 'RandLANet_1')
-        self.assertTrue(args.verbose)
-        self.assertEqual(args.device, 'cpu')
-        self.assertFalse(hasattr(args, 'mode'))
-
-    def test_single_file_creates_modified_copy_beside_source(self):
-        with tempfile.TemporaryDirectory() as directory:
-            input_file = pathlib.Path(directory) / 'cloud.las'
-            write_las(input_file)
-            args = main.argparser([
-                '--model_name', 'RandLANet_1',
-                '--input_path', str(input_file),
-            ])
-
-            with patch.object(main, 'SegmentClass', FixedSegmenter):
-                outputs = main.process_files(args)
-
-            output_file = pathlib.Path(directory) / 'cloud_mod.las'
-            self.assertEqual(outputs, [output_file])
-            self.assertTrue(output_file.exists())
-            np.testing.assert_array_equal(
-                laspy.read(input_file).classification,
-                [7, 7, 7, 7],
-            )
-            np.testing.assert_array_equal(
-                laspy.read(output_file).classification,
-                [1, 2, 1, 2],
-            )
-
-    def test_directory_output_preserves_relative_paths(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            input_dir = root / 'input'
-            output_dir = root / 'output'
-            write_las(input_dir / 'first.las')
-            write_las(input_dir / 'nested' / 'second.las')
-            write_las(input_dir / 'ignored_mod.las')
-            (input_dir / 'notes.txt').write_text('not a point cloud')
-
-            args = main.argparser([
-                '--model_name', 'RandLANet_1',
-                '--input_path', str(input_dir),
-                '--output_path', str(output_dir),
-            ])
-            with patch.object(main, 'SegmentClass', FixedSegmenter):
-                outputs = main.process_files(args)
-
-            self.assertEqual(outputs, [
-                output_dir / 'first_mod.las',
-                output_dir / 'nested' / 'second_mod.las',
-            ])
-            self.assertTrue(outputs[0].exists())
-            self.assertTrue(outputs[1].exists())
-            self.assertEqual(len(FixedSegmenter.instances), 1)
-
-    def test_cuda_request_fails_when_cuda_is_unavailable(self):
-        with tempfile.TemporaryDirectory() as directory:
-            input_file = pathlib.Path(directory) / 'cloud.las'
-            write_las(input_file)
-            args = main.argparser([
-                '--model_name', 'RandLANet_1',
-                '--device', 'cuda',
-                '--input_path', str(input_file),
-            ])
-
-            with patch.object(torch.cuda, 'is_available', return_value=False), \
-                    patch.object(main, 'SegmentClass', FixedSegmenter):
-                with self.assertRaisesRegex(RuntimeError, 'not available'):
-                    main.process_files(args)
-
-            self.assertFalse(FixedSegmenter.instances)
+@pytest.fixture(autouse=True)
+def isolated_tracking_files(tmp_path, monkeypatch):
+    FixedSegmenter.instances = []
+    monkeypatch.setattr(
+        main,
+        "PROCESSED_FILES_PATH",
+        tmp_path / "processed_files.txt",
+    )
+    monkeypatch.setattr(
+        main,
+        "ERROR_FILES_PATH",
+        tmp_path / "error_files.txt",
+    )
 
 
-if __name__ == '__main__':
-    unittest.main()
+def test_parser_accepts_only_processing_arguments(tmp_path):
+    input_file = tmp_path / "cloud.las"
+    write_las(input_file)
+
+    args = main.argparser([
+        "--model_name", "RandLANet_1",
+        "--verbose",
+        "--device", "cpu",
+        "--input_path", str(input_file),
+        "--output_path", str(tmp_path / "output"),
+    ])
+
+    assert args.model_name == "RandLANet_1"
+    assert args.verbose
+    assert args.device == "cpu"
+    assert not hasattr(args, "mode")
+
+
+def test_single_file_creates_modified_copy_beside_source(tmp_path, monkeypatch):
+    input_file = tmp_path / "cloud.las"
+    write_las(input_file)
+    args = main.argparser([
+        "--model_name", "RandLANet_1",
+        "--input_path", str(input_file),
+    ])
+    monkeypatch.setattr(main, "SegmentClass", FixedSegmenter)
+
+    outputs = main.process_files(args)
+
+    output_file = tmp_path / "cloud_mod.las"
+    assert outputs == [output_file]
+    assert output_file.exists()
+    np.testing.assert_array_equal(
+        laspy.read(input_file).classification,
+        [7, 7, 7, 7],
+    )
+    np.testing.assert_array_equal(
+        laspy.read(output_file).classification,
+        [1, 2, 1, 2],
+    )
+    assert main.PROCESSED_FILES_PATH.read_text(encoding="utf-8") == (
+        f"{input_file.as_posix()} -> {output_file.as_posix()}\n"
+    )
+
+
+def test_directory_output_preserves_relative_paths(tmp_path, monkeypatch):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    write_las(input_dir / "first.las")
+    write_las(input_dir / "nested" / "second.las")
+    write_las(input_dir / "ignored_mod.las")
+    (input_dir / "notes.txt").write_text("not a point cloud")
+    args = main.argparser([
+        "--model_name", "RandLANet_1",
+        "--input_path", str(input_dir),
+        "--output_path", str(output_dir),
+    ])
+    monkeypatch.setattr(main, "SegmentClass", FixedSegmenter)
+
+    outputs = main.process_files(args)
+
+    assert outputs == [
+        output_dir / "first_mod.las",
+        output_dir / "nested" / "second_mod.las",
+    ]
+    assert all(path.exists() for path in outputs)
+    assert len(FixedSegmenter.instances) == 1
+
+
+def test_previously_processed_file_is_skipped_even_if_it_has_an_error(
+    tmp_path,
+    monkeypatch,
+):
+    input_file = tmp_path / "cloud.las"
+    output_file = tmp_path / "cloud_mod.las"
+    write_las(input_file)
+    main.PROCESSED_FILES_PATH.write_text(
+        f"{input_file.as_posix()} -> {output_file.as_posix()}\n",
+        encoding="utf-8",
+    )
+    main.ERROR_FILES_PATH.write_text(
+        f"{input_file.as_posix()}\n",
+        encoding="utf-8",
+    )
+    args = main.argparser([
+        "--model_name", "RandLANet_1",
+        "--input_path", str(input_file),
+    ])
+    monkeypatch.setattr(main, "SegmentClass", FixedSegmenter)
+
+    outputs = main.process_files(args)
+
+    assert outputs == []
+    assert not output_file.exists()
+    assert not FixedSegmenter.instances
+
+
+def test_failed_file_is_logged_and_other_files_continue(tmp_path, monkeypatch):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    bad_file = input_dir / "bad.las"
+    good_file = input_dir / "good.las"
+    bad_file.parent.mkdir(parents=True)
+    bad_file.write_text("not a LAS file", encoding="utf-8")
+    write_las(good_file)
+    args = main.argparser([
+        "--model_name", "RandLANet_1",
+        "--input_path", str(input_dir),
+        "--output_path", str(output_dir),
+    ])
+    monkeypatch.setattr(main, "SegmentClass", FixedSegmenter)
+
+    outputs = main.process_files(args)
+
+    good_output = output_dir / "good_mod.las"
+    assert outputs == [good_output]
+    assert main.ERROR_FILES_PATH.read_text(encoding="utf-8") == (
+        f"{bad_file.as_posix()}\n"
+    )
+    assert main.PROCESSED_FILES_PATH.read_text(encoding="utf-8") == (
+        f"{good_file.as_posix()} -> {good_output.as_posix()}\n"
+    )
+
+
+def test_cuda_request_fails_when_cuda_is_unavailable(tmp_path, monkeypatch):
+    input_file = tmp_path / "cloud.las"
+    write_las(input_file)
+    args = main.argparser([
+        "--model_name", "RandLANet_1",
+        "--device", "cuda",
+        "--input_path", str(input_file),
+    ])
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(main, "SegmentClass", FixedSegmenter)
+
+    with pytest.raises(RuntimeError, match="not available"):
+        main.process_files(args)
+
+    assert not FixedSegmenter.instances
