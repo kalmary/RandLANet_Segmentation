@@ -15,7 +15,7 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from utils import compute_mIoU, calculate_weighted_accuracy
-from utils import compute_pos_weights, get_dataset_len, FocalLoss_ArcFace, FocalLoss
+from utils import compute_pos_weights_prob, get_dataset_len, FocalLoss
 from utils import wrap_hist
 
 from tqdm import tqdm
@@ -31,12 +31,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
     try:
 
-        class_weights_t = compute_pos_weights(data_dir=training_dict['data_path_train'],
+        class_weights_t = compute_pos_weights_prob(data_dir=training_dict['data_path_train'],
                                                 num_classes=training_dict['num_classes'],
                                                 power=0.5)
 
         
-        class_weights_v = compute_pos_weights(data_dir=training_dict['data_path_val'],
+        class_weights_v = compute_pos_weights_prob(data_dir=training_dict['data_path_val'],
                                                 num_classes=training_dict['num_classes'],
                                                 power=0.5
         )
@@ -73,33 +73,20 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         model.to(training_dict['device'])
 
-        
-        # criterion_t = FocalLoss(alpha=class_weights_t.to(device_loss),
-        #                         gamma=training_dict['focal_loss_gamma'],
-        #                         smoothing=0.1,
-        #                         reduction='mean').to(device_loss) # TODO double check - Labels smoothing is good for better generalization, but exact impact must be investigated
-        
-        # criterion_v = FocalLoss(alpha=class_weights_v.to(device_loss),
-        #                         gamma=training_dict['focal_loss_gamma'],
-        #                         smoothing=0.1,
-        #                         reduction='mean').to(device_loss)
 
+        criterion_t = FocalLoss(
+            alpha=class_weights_t.to(device_loss),
+            gamma=training_dict['focal_loss_gamma'],
+            smoothing=0.1,
+            reduction='mean',
+        ).to(device_loss)
 
-        # criterion_t = FocalLoss_ArcFace(alpha=class_weights_t.to(device_loss),
-        #                   gamma=training_dict['focal_loss_gamma'],
-        #                   smoothing=0.1,
-        #                   reduction='mean').to(device_loss)
-        
-        # criterion_v = FocalLoss_ArcFace(alpha=class_weights_v.to(device_loss),
-        #                   gamma=training_dict['focal_loss_gamma'],
-        #                   smoothing=0.1,
-        #                   reduction='mean').to(device_loss)
-
-        criterion_t = nn.CrossEntropyLoss(weight=class_weights_t.to(device_loss),
-                                        label_smoothing=0.1).to(device_loss)
-        
-        criterion_v = nn.CrossEntropyLoss(weight=class_weights_v.to(device_loss),
-                                        label_smoothing=0.1).to(device_loss)
+        criterion_v = FocalLoss(
+            alpha=class_weights_v.to(device_loss),
+            gamma=training_dict['focal_loss_gamma'],
+            smoothing=0.1,
+            reduction='mean',
+        ).to(device_loss)
 
 
         optimizer = optim.AdamW(model.parameters(), lr = training_dict['learning_rate'], weight_decay=training_dict['weight_decay'])
