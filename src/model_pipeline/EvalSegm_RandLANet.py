@@ -17,13 +17,13 @@ from _data_loader import make_loader
 
 from utils import load_json, load_model, convert_str_values
 from utils import calculate_accuracy, calculate_weighted_accuracy, compute_mIoU
-from utils import compute_pos_weights, FocalLoss_ArcFace, get_intLabels, get_Probabilities
+from utils import compute_pos_weights_prob, FocalLoss, get_intLabels, get_Probabilities
 from utils import Plotter, ClassificationReport
 
 
 def _eval_model(config_dict: dict,
                 model: nn.Module) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    class_weights = compute_pos_weights(
+    class_weights = compute_pos_weights_prob(
         data_dir=config_dict['data_path_test'],
         num_classes=config_dict['num_classes'],
         power=0.5,
@@ -64,7 +64,7 @@ def calculate_metrics(outputs: torch.Tensor,
                       class_weights: torch.Tensor,
                       num_classes: int,
                       focal_loss_gamma: float) -> dict:
-    criterion = FocalLoss_ArcFace(
+    criterion = FocalLoss(
         alpha=class_weights,
         gamma=focal_loss_gamma,
     )

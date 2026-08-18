@@ -69,7 +69,7 @@ def test_inference_collects_outputs_before_metrics(monkeypatch):
 
     monkeypatch.setattr(
         evaluation,
-        "compute_pos_weights",
+        "compute_pos_weights_prob",
         lambda **kwargs: weights,
     )
     monkeypatch.setattr(evaluation, "make_loader", make_loader)
@@ -101,6 +101,24 @@ def test_parser_does_not_offer_an_unused_device():
     assert not hasattr(args, "device")
 
 
+def test_prob_weights_count_point_labels(tmp_path):
+    tile = np.zeros((4, 5), dtype=np.float32)
+    tile[:, 4] = [0, 0, 0, 1]
+    np.save(tmp_path / "scan_source_tile_000_000.npy", tile)
+
+    weights = evaluation.compute_pos_weights_prob(
+        data_dir=tmp_path,
+        num_classes=2,
+        power=0.5,
+    )
+
+    assert isinstance(weights, torch.Tensor)
+    torch.testing.assert_close(
+        weights,
+        torch.tensor([1.0 / np.sqrt(3.0), 1.0], dtype=torch.float32),
+    )
+
+
 def test_metrics_use_all_points_and_supplied_weights():
     outputs = torch.tensor([
         [
@@ -120,7 +138,7 @@ def test_metrics_use_all_points_and_supplied_weights():
     )
 
     assert metrics["accuracy"] == pytest.approx(0.75)
-    assert metrics["weighted_accuracy"] == pytest.approx(2.0 / 3.0)
+    assert metrics["weighted_accuracy"] == pytest.approx(0.5)
     assert metrics["miou"] == pytest.approx(7.0 / 12.0)
     np.testing.assert_allclose(metrics["class_iou"], [2.0 / 3.0, 0.5])
     assert metrics["probabilities"].shape == (4, 2)
