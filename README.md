@@ -134,12 +134,9 @@ NPY tile. Missing directories, directories without NPY tiles, malformed tiles,
 empty tiles, and labels outside the configured classes stop training with a
 descriptive error.
 
-By default, training measures the iterable train and validation loaders before
-training so progress totals and `OneCycleLR` have a fixed step count. Set
-`MEASURE_DATASET_LENGTH = False` near the top of
-`src/model_pipeline/_train_single_case.py` to skip this preliminary pass.
-Progress bars will then use unknown totals and training will use
-`ReduceLROnPlateau` based on validation loss instead.
+Training does not run a preliminary pass to measure the iterable loaders.
+Progress bars therefore use unknown totals, and `ReduceLROnPlateau` adjusts the
+learning rate once per epoch based on validation loss.
 
 Mode `2` currently runs 80 Optuna trials. Change `n_trials` in `main()` if a
 different optimization budget is required. The best model, its config, and
