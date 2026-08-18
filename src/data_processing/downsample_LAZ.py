@@ -186,24 +186,70 @@ def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
 # ------------------------------------------------------------------
 # 5. Train / val / test split
 # ------------------------------------------------------------------
-def split_dataset(cut_dir, out_dir):
+def split_dataset(
+    cut_dir,
+    out_dir,
+    train=0.7,
+    val=0.15,
+    test=0.15,
+    seed=42,
+):
+    if abs(train + val + test - 1.0) >= 1e-6:
+        raise ValueError("train, val, and test fractions must sum to 1")
+
     cut_dir = Path(cut_dir)
     out_dir = Path(out_dir)
+    split_names = ("train", "val", "test")
+    split_dirs = {split: cut_dir / split for split in split_names}
+    existing_split_dirs = [path.exists() for path in split_dirs.values()]
 
-    split_dirs = {split: cut_dir / split for split in ("train", "val", "test")}
-    if not all(d.exists() for d in split_dirs.values()):
-        raise RuntimeError("cut_dir must contain train/, val/, and test/ subfolders")
+    if any(existing_split_dirs) and not all(existing_split_dirs):
+        raise RuntimeError(
+            "cut_dir must contain all or none of train/, val/, and test/"
+        )
 
-    for split in ("train", "val", "test"):
+    for split in split_names:
         (out_dir / split).mkdir(parents=True, exist_ok=True)
 
-    counts = {"train": 0, "val": 0, "test": 0}
-    for split, src_dir in split_dirs.items():
-        for npy_path in tqdm(sorted(src_dir.glob("*.npy")), desc=f"Copying {split}", unit="tile"):
+    counts = {split: 0 for split in split_names}
+    if all(existing_split_dirs):
+        split_tiles = {
+            split: sorted(source_dir.glob("*.npy"))
+            for split, source_dir in split_dirs.items()
+        }
+    else:
+        tiles = sorted(cut_dir.glob("*.npy"))
+        scan_names = sorted(
+            {"_".join(tile.stem.split("_")[:-3]) for tile in tiles}
+        )
+        rng = np.random.default_rng(seed)
+        order = rng.permutation(len(scan_names))
+        n_train = int(len(scan_names) * train)
+        n_val = int(len(scan_names) * val)
+        train_scans = {scan_names[index] for index in order[:n_train]}
+        val_scans = {
+            scan_names[index]
+            for index in order[n_train:n_train + n_val]
+        }
+        split_tiles = {split: [] for split in split_names}
+        for tile in tiles:
+            scan = "_".join(tile.stem.split("_")[:-3])
+            split = (
+                "train" if scan in train_scans
+                else "val" if scan in val_scans
+                else "test"
+            )
+            split_tiles[split].append(tile)
+
+    for split, tiles in split_tiles.items():
+        for npy_path in tqdm(tiles, desc=f"Copying {split}", unit="tile"):
             pkl_path = npy_path.with_suffix(".pkl")
+            if not pkl_path.exists():
+                raise FileNotFoundError(
+                    f"Missing matching KD-tree for {npy_path}"
+                )
             shutil.copy(npy_path, out_dir / split / npy_path.name)
-            if pkl_path.exists():
-                shutil.copy(pkl_path, out_dir / split / pkl_path.name)
+            shutil.copy(pkl_path, out_dir / split / pkl_path.name)
             counts[split] += 1
 
     print(f"\nSplit complete: {counts}")

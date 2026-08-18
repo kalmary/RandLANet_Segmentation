@@ -103,6 +103,24 @@ def test_save_tiles_does_not_overwrite_existing_artifacts(tmp_path, save_tile):
     assert tree_path.read_bytes() == tree_data
 
 
+def test_split_dataset_preserves_existing_dales_splits(tmp_path, save_tile):
+    cut_dir = tmp_path / "cut"
+    output_dir = tmp_path / "split"
+
+    for split in ("train", "val", "test"):
+        save_tile(tmp_path / split / f"{split}.las", cut_dir / split)
+
+    downsample_LAZ.split_dataset(cut_dir, output_dir)
+
+    for split in ("train", "val", "test"):
+        point_files = list((output_dir / split).glob("*.npy"))
+        tree_files = list((output_dir / split).glob("*.pkl"))
+        assert len(point_files) == 1
+        assert len(tree_files) == 1
+        assert point_files[0].stem == tree_files[0].stem
+        assert point_files[0].stem.startswith(split)
+
+
 def test_split_dataset_keeps_point_clouds_and_trees_paired(tmp_path, save_tile):
     cut_dir = tmp_path / "cut"
     output_dir = tmp_path / "split"
