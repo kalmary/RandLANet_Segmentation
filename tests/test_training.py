@@ -36,6 +36,16 @@ def test_load_config_requires_cuda(tmp_path, monkeypatch):
         training.load_config(tmp_path, mode=1)
 
 
+def test_train_model_propagates_missing_dataset_error(tmp_path):
+    config = {
+        "data_path_train": tmp_path / "missing",
+        "num_classes": 2,
+    }
+
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        next(training.train_model(config))
+
+
 def test_test_case_accepts_two_value_training_results(monkeypatch):
     result_hist = {"loss_hist": [1.0]}
     monkeypatch.setattr(

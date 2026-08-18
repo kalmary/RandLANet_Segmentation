@@ -101,6 +101,32 @@ def test_parser_does_not_offer_an_unused_device():
     assert not hasattr(args, "device")
 
 
+def test_prob_weights_reject_missing_dataset_directory(tmp_path):
+    missing = tmp_path / "missing"
+
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        evaluation.compute_pos_weights_prob(missing, num_classes=2)
+
+
+def test_prob_weights_reject_empty_dataset_directory(tmp_path):
+    with pytest.raises(FileNotFoundError, match="No .npy point-cloud tiles"):
+        evaluation.compute_pos_weights_prob(tmp_path, num_classes=2)
+
+
+def test_prob_weights_reject_malformed_or_empty_tiles(tmp_path):
+    malformed = tmp_path / "malformed.npy"
+    np.save(malformed, np.zeros((4, 4), dtype=np.float32))
+
+    with pytest.raises(ValueError, match=r"Expected \(N, 5\) data"):
+        evaluation.compute_pos_weights_prob(tmp_path, num_classes=2)
+
+    malformed.unlink()
+    np.save(tmp_path / "empty.npy", np.zeros((0, 5), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="contains no points"):
+        evaluation.compute_pos_weights_prob(tmp_path, num_classes=2)
+
+
 def test_prob_weights_count_point_labels(tmp_path):
     tile = np.zeros((4, 5), dtype=np.float32)
     tile[:, 4] = [0, 0, 0, 1]
