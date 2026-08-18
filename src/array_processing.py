@@ -22,6 +22,7 @@ class SegmentClass:
         self,
         model_name: str,
         config_dir: Union[str, Path] = "final_files",
+        model_dir: Union[str, Path, None] = None,
         device: Union[str, torch.device] = torch.device("cpu"),
         voxel_size: float = 0.10,
         tile_size: float = 40.0,
@@ -58,6 +59,10 @@ class SegmentClass:
         if not config_dir.is_absolute():
             config_dir = base_path / config_dir
 
+        model_dir = config_dir if model_dir is None else Path(model_dir)
+        if not model_dir.is_absolute():
+            model_dir = base_path / model_dir
+
         self._config = self._load_config(config_dir)
         self._model_config = self._config["model_config"]
         self.num_points = int(self._config["num_points"])
@@ -74,7 +79,7 @@ class SegmentClass:
         if self.max_overlaps > np.iinfo(np.int8).max:
             raise ValueError("tile overlap count must fit in int8")
 
-        self._model = self._load_model(config_dir)
+        self._model = self._load_model(model_dir)
 
     def _load_config(self, config_dir: Path) -> dict:
         config_path = config_dir / f"{self.model_name}_config.json"
@@ -92,6 +97,10 @@ class SegmentClass:
         )
         model.eval()
         return model
+
+    @property
+    def config(self) -> dict:
+        return self._config
 
     @property
     def model_config(self) -> dict:

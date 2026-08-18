@@ -1,252 +1,320 @@
-import torch
-import torch.nn as nn
-
 import argparse
-from tqdm import tqdm
 import pathlib as pth
 import sys
+from typing import Any, TypedDict
+
+import laspy
+import numpy as np
+import torch
+from numpy.typing import NDArray
+from tqdm import tqdm
 
 
 model_pipeline_dir = pth.Path(__file__).parent
 src_dir = model_pipeline_dir.parent
-sys.path.append(str(model_pipeline_dir))
 sys.path.append(str(src_dir))
 
-from RandLANet_CB import RandLANet
-from _data_loader import make_loader
-
-from utils import load_json, load_model, convert_str_values
-from utils import calculate_accuracy, compute_mIoU
-from utils import compute_pos_weights_prob, FocalLoss, get_intLabels, get_Probabilities
-from utils import Plotter, ClassificationReport
+from array_processing import SegmentClass
+from utils import ClassificationReport, Plotter, compute_mIoU
 
 
-def _eval_model(config_dict: dict,
-                model: nn.Module) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    class_weights = compute_pos_weights_prob(
-        data_dir=config_dict['data_path_test'],
-        num_classes=config_dict['num_classes'],
-        power=0.5,
+POINT_CLOUD_SUFFIXES = {'.las', '.laz'}
+MAX_POINTS_PER_FILE = 0
+
+
+class EvaluationMetrics(TypedDict):
+    accuracy: float
+    miou: float
+    class_iou: NDArray[Any]
+    predictions: NDArray[Any]
+    targets: NDArray[Any]
+
+
+def _model_name(value: str) -> str:
+    if value.lower().endswith('.pt'):
+        raise argparse.ArgumentTypeError('model_name must not include .pt')
+    if not value:
+        raise argparse.ArgumentTypeError('model_name cannot be empty')
+    return value
+
+
+def _input_path(value: str) -> pth.Path:
+    path = pth.Path(value)
+    if not path.exists():
+        raise argparse.ArgumentTypeError(f'input path does not exist: {path}')
+    if path.is_file() and path.suffix.lower() not in POINT_CLOUD_SUFFIXES:
+        raise argparse.ArgumentTypeError('input file must be .las or .laz')
+    if not path.is_file() and not path.is_dir():
+        raise argparse.ArgumentTypeError(f'unsupported input path: {path}')
+    return path
+
+
+def _input_files(input_path: pth.Path) -> list[pth.Path]:
+    if input_path.is_file():
+        if (
+            input_path.suffix.lower() in POINT_CLOUD_SUFFIXES
+            and not input_path.stem.endswith('_mod')
+        ):
+            return [input_path]
+        return []
+
+    return sorted(
+        path
+        for path in input_path.rglob('*')
+        if path.is_file()
+        and path.suffix.lower() in POINT_CLOUD_SUFFIXES
+        and not path.stem.endswith('_mod')
     )
-    test_loader, _ = make_loader(
-        data_dir=config_dict['data_path_test'],
-        num_points=config_dict['num_points'],
-        batch_size=config_dict['batch_size'],
-        query_workers=config_dict.get('query_workers', 7),
-        shuffle=False,
+
+
+def collect_labels(
+    segmenter: SegmentClass,
+    input_path: pth.Path,
+    verbose: bool = False,
+    max_points_per_file: int = MAX_POINTS_PER_FILE,
+) -> tuple[NDArray[np.int8], NDArray[np.int8]]:
+    if max_points_per_file < 0:
+        raise ValueError('max_points_per_file cannot be negative')
+
+    files = _input_files(input_path)
+    if not files:
+        raise FileNotFoundError(f'No LAS or LAZ files in {input_path}')
+
+    prediction_parts: list[NDArray[np.int8]] = []
+    target_parts: list[NDArray[np.int8]] = []
+    progress = (
+        tqdm(files, desc='Evaluating files', unit='file')
+        if verbose
+        else None
     )
+    iterator = progress if progress is not None else files
 
-    output_batches = []
-    label_batches = []
+    for file_path in iterator:
+        cloud = laspy.read(file_path)
+        source_labels = np.asarray(cloud.classification, dtype=np.int16)
+        assessed = source_labels != 0
+        if not np.any(assessed):
+            continue
 
-    model.eval()
-    pbar = tqdm(test_loader, desc="Testing", unit="batch")
-    with torch.no_grad():
-        for batch_x, batch_y in pbar:
-            outputs = model(batch_x.to(config_dict['device']))
-            output_batches.append(outputs.cpu())
-            label_batches.append(batch_y.cpu())
+        targets = source_labels[assessed] - 1
+        if targets.max() >= segmenter.n_classes:
+            raise ValueError(
+                f'{file_path} contains class {targets.max() + 1}, '
+                f'but the model has {segmenter.n_classes} classes'
+            )
 
-    if not output_batches:
-        raise RuntimeError("Test loader produced no batches")
+        evaluation_indices = None
+        if max_points_per_file:
+            evaluation_indices = np.flatnonzero(assessed)
+            if len(evaluation_indices) > max_points_per_file:
+                evaluation_indices = np.sort(
+                    np.random.choice(
+                        evaluation_indices,
+                        size=max_points_per_file,
+                        replace=False,
+                    )
+                )
+            targets = source_labels[evaluation_indices] - 1
 
-    return (
-        torch.cat(output_batches, dim=0),
-        torch.cat(label_batches, dim=0),
-        class_weights,
+        if evaluation_indices is None:
+            points = np.column_stack(
+                (
+                    np.asarray(cloud.x),
+                    np.asarray(cloud.y),
+                    np.asarray(cloud.z),
+                )
+            )
+            intensity = np.asarray(cloud.intensity)
+            expected_predictions = len(source_labels)
+        else:
+            points = np.column_stack(
+                (
+                    np.asarray(cloud.X)[evaluation_indices]
+                    * cloud.header.x_scale
+                    + cloud.header.x_offset,
+                    np.asarray(cloud.Y)[evaluation_indices]
+                    * cloud.header.y_scale
+                    + cloud.header.y_offset,
+                    np.asarray(cloud.Z)[evaluation_indices]
+                    * cloud.header.z_scale
+                    + cloud.header.z_offset,
+                )
+            )
+            intensity = np.asarray(cloud.intensity[evaluation_indices])
+            expected_predictions = len(evaluation_indices)
+
+        predictions = np.asarray(
+            segmenter.segment_pcd(points, intensity),
+            dtype=np.int16,
+        )
+        if predictions.shape != (expected_predictions,):
+            raise ValueError(
+                f'Expected {expected_predictions} predictions for {file_path}, '
+                f'got shape {predictions.shape}'
+            )
+        if predictions.min() < 0 or predictions.max() >= segmenter.n_classes:
+            raise ValueError(
+                f'Predictions outside the model class range for {file_path}'
+            )
+
+        if evaluation_indices is None:
+            predictions = predictions[assessed]
+
+        prediction_parts.append(predictions.astype(np.int8))
+        target_parts.append(targets.astype(np.int8))
+
+        if progress is not None:
+            progress.set_postfix_str(file_path.name)
+
+    if not target_parts:
+        raise RuntimeError('Input files contain no classified points')
+
+    return np.concatenate(prediction_parts), np.concatenate(target_parts)
+
+
+def calculate_metrics(
+    predictions: NDArray[Any],
+    targets: NDArray[Any],
+    num_classes: int,
+) -> EvaluationMetrics:
+    predictions = np.asarray(predictions).reshape(-1)
+    targets = np.asarray(targets).reshape(-1)
+    if predictions.shape != targets.shape:
+        raise ValueError('predictions and targets must have the same shape')
+    if targets.size == 0:
+        raise ValueError('predictions and targets cannot be empty')
+
+    accuracy = float(np.mean(predictions == targets))
+    miou, class_iou = compute_mIoU(
+        torch.from_numpy(predictions.astype(np.int64, copy=False)),
+        torch.from_numpy(targets.astype(np.int64, copy=False)),
+        num_classes,
     )
-
-
-def calculate_metrics(outputs: torch.Tensor,
-                      labels: torch.Tensor,
-                      class_weights: torch.Tensor,
-                      num_classes: int,
-                      focal_loss_gamma: float) -> dict:
-    criterion = FocalLoss(
-        alpha=class_weights,
-        gamma=focal_loss_gamma,
-    )
-    loss = criterion(outputs, labels).item()
-    accuracy = calculate_accuracy(outputs, labels)
-
-    probabilities = get_Probabilities(outputs)
-    predictions = get_intLabels(probabilities)
-    miou, class_iou = compute_mIoU(predictions, labels, num_classes)
-
-    probabilities = probabilities.movedim(1, -1).reshape(-1, num_classes)
     return {
-        'loss': loss,
         'accuracy': accuracy,
         'miou': miou,
         'class_iou': class_iou.numpy(),
-        'labels': labels.reshape(-1).numpy(),
-        'probabilities': probabilities.numpy(),
-        'predictions': predictions.reshape(-1).numpy(),
+        'predictions': predictions,
+        'targets': targets,
     }
 
-def eval_model_front(config_dict: dict,
-         model: nn.Module,
-         paths: list[pth.Path]):
 
-    model_path = paths[0]
+def eval_model_front(
+    segmenter: SegmentClass,
+    input_path: pth.Path,
+    model_path: pth.Path,
+    plot_dir: pth.Path,
+    verbose: bool = False,
+    max_points_per_file: int = MAX_POINTS_PER_FILE,
+) -> EvaluationMetrics:
     model_name = model_path.stem
-
-    plot_dir = paths[1]
     plot_dir.mkdir(exist_ok=True, parents=True)
 
-    outputs, labels, class_weights = _eval_model(
-        config_dict=config_dict,
-        model=model,
+    predictions, targets = collect_labels(
+        segmenter,
+        input_path,
+        verbose=verbose,
+        max_points_per_file=max_points_per_file,
     )
     metrics = calculate_metrics(
-        outputs=outputs,
-        labels=labels,
-        class_weights=class_weights,
-        num_classes=config_dict['num_classes'],
-        focal_loss_gamma=config_dict['focal_loss_gamma'],
+        predictions,
+        targets,
+        segmenter.n_classes,
     )
-    del outputs, labels
 
-    plotter = Plotter(config_dict['num_classes'], plots_dir=plot_dir)
+    plotter = Plotter(segmenter.n_classes, plots_dir=plot_dir)
     plotter.cnf_matrix(
         f'confusion_matrix_{model_name}.png',
-        target=metrics['labels'],
+        target=metrics['targets'],
         prediction=metrics['predictions'],
-        num_classes=config_dict['num_classes'],
+        num_classes=segmenter.n_classes,
     )
-    plotter.prc_curve(
-        f'precision_recall_curve_{model_name}.png',
-        target=metrics['labels'],
-        pred_prob=metrics['probabilities'],
-    )
-    plotter.roc_curve(
-        f'roc_curve_{model_name}.png',
-        target=metrics['labels'],
-        pred_prob=metrics['probabilities'],
-    )
-    
-    print('='*20)
+
+    print('=' * 20)
     print('MODEL TESTED')
     print('Model path', model_path)
-    print('Loss: ', metrics['loss'])
     print('Accuracy: ', metrics['accuracy'])
     print('mIoU: ', metrics['miou'])
     print('IoU per class: ', metrics['class_iou'])
     print('Plots saved to:', plot_dir)
-    print('='*20)
-    
+    print('=' * 20)
+
     metrics_report = (
-        f"Loss: {metrics['loss']}\n"
         f"Accuracy: {metrics['accuracy']}\n"
         f"mIoU: {metrics['miou']}\n"
         f"IoU per class: {metrics['class_iou']}"
     )
-    ClassificationReport(file_path=plot_dir.joinpath(f'classification_report_{model_name}.txt'),
-                         pred=metrics['predictions'],
-                         target=metrics['labels'],
-                         additional_info=metrics_report)
-
-def test_function(config_dict: dict,
-                  model):
-    val_loader, _ = make_loader(
-        data_dir=config_dict['data_path_test'],
-        num_points=config_dict['num_points'],
-        batch_size=config_dict['batch_size'],
-        query_workers=config_dict.get('query_workers', 7),
-        shuffle=False,
+    ClassificationReport(
+        file_path=plot_dir / f'classification_report_{model_name}.txt',
+        pred=metrics['predictions'],
+        target=metrics['targets'],
+        additional_info=metrics_report,
     )
-    
-    batch_x, _ = next(iter(val_loader))
-    batch_x = batch_x.to(config_dict['device'])
+    return metrics
 
-    model.eval()
-    outputs = model(batch_x)
-
-    expected_shape = (
-        batch_x.shape[0],
-        config_dict['num_classes'],
-        batch_x.shape[1],
-    )
-    if outputs.shape == expected_shape:
-        print('Model works as expected')
-    else:
-        print(f'Model does not work as expected\n')
-        print(f'Expected output shape: {expected_shape}\nReceived: {outputs.shape}')
 
 def parser(args=None):
-        
-    """
-    Parse command-line arguments for model evaluation.
-    Accepts model naming and evaluation mode selection.
-    Returns parsed arguments with validation for device choices and formatted help text display.
-    """
-    
-    parser = argparse.ArgumentParser(
-        description="Script for testing the choosen model",
-        formatter_class=argparse.RawTextHelpFormatter
+    argument_parser = argparse.ArgumentParser(
+        description='Dense semantic-segmentation evaluation for LAS and LAZ files.'
     )
-
-    parser.add_argument(
+    argument_parser.add_argument(
         '--model_name',
-        type=str,
+        type=_model_name,
         required=True,
-        help=(
-            "Base of the model's name.\n"
-            "When iterating, name also gets an ID."
-        )
+        help='Model filename without the .pt extension.',
     )
-
-    parser.add_argument(
-        '--mode',
-        type=int,
-        default=0,
-        choices=[0, 1],
+    argument_parser.add_argument(
+        '--input_path',
+        type=_input_path,
         help=(
-            "Evaluation mode.\n"
-            'Pick:\n'
-            '0: testing mode - check if model compiles and works as expected\n'
-            '1: evaluate trained model'
-        )
+            'Raw LAS/LAZ test file or directory. If omitted, data_path_test_raw '
+            'or data_path_test from the saved model config is used.'
+        ),
     )
+    return argument_parser.parse_args(args)
 
-    return parser.parse_args(args)
 
 def main():
     args = parser()
-    base_path = pth.Path(__file__).parent
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is required for evaluation")
-    device = torch.device('cuda')
+        raise RuntimeError('CUDA is required for evaluation')
 
-    model_name = args.model_name
-    model_name_no_num = model_name.rsplit('_', 1)[0]
+    model_name_no_num = args.model_name.rsplit('_', 1)[0]
+    model_dir = model_pipeline_dir / 'training_results' / model_name_no_num
+    config_dir = model_dir / 'dict_files'
+    model_path = model_dir / f'{args.model_name}.pt'
+    plot_dir = model_dir / 'plots'
 
-    model_dir = base_path.joinpath(f'training_results/{model_name_no_num}')
-    config_trained_dir = model_dir.joinpath('dict_files')
-    model_path = config_trained_dir.joinpath(f'{model_name}_config.json')
-    plot_dir = model_dir.joinpath('plots')
+    segmenter = SegmentClass(
+        model_name=args.model_name,
+        config_dir=config_dir,
+        model_dir=model_dir,
+        device=torch.device('cuda'),
+        pbar_bool=False,
+    )
+    configured_input = segmenter.config.get(
+        'data_path_test_raw',
+        segmenter.config.get('data_path_test'),
+    )
+    if args.input_path is not None:
+        input_path = args.input_path
+    else:
+        if configured_input is None:
+            raise KeyError(
+                'Saved model config has neither data_path_test_raw nor '
+                'data_path_test; provide --input_path'
+            )
+        input_path = pth.Path(str(configured_input))
 
-    config_dict = load_json(model_path)
-    config_dict = convert_str_values(config_dict)
-    config_dict['device'] = device
-    
-    model = RandLANet(model_config=config_dict['model_config'], n_classes=config_dict['num_classes'])
-    model = load_model(file_path=model_dir.joinpath(f'{model_name}.pt'),
-                       model=model,
-                       device=device)
-    model.eval()
-
-    if args.mode == 0:
-        test_function(config_dict, model)
-    elif args.mode == 1:
-        eval_model_front(config_dict=config_dict,
-                         model=model,
-                         paths=[model_path,
-                                plot_dir])
-        
-
+    eval_model_front(
+        segmenter=segmenter,
+        input_path=input_path,
+        model_path=model_path,
+        plot_dir=plot_dir,
+        verbose=True,
+        max_points_per_file=MAX_POINTS_PER_FILE,
+    )
 
 
 if __name__ == '__main__':
     main()
-
