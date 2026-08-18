@@ -95,7 +95,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         total_t, total_v = _dataset_lengths(
             trainLoader,
             valLoader,
-            enabled=False,
+            enabled=True,
         )
 
         if training_dict['model'] is None:
