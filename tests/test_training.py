@@ -3,6 +3,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+import torch
+from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 
 
 project_root = pathlib.Path(__file__).resolve().parents[1]
@@ -11,6 +13,7 @@ sys.path.append(str(project_root))
 sys.path.append(str(model_pipeline_dir))
 
 from src.model_pipeline import TrainSegmAutomated as training
+from src.model_pipeline import _train_single_case as train_case
 
 
 class CompilableModel:
@@ -34,6 +37,45 @@ def test_load_config_requires_cuda(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="CUDA is required"):
         training.load_config(tmp_path, mode=1)
+
+
+def test_dataset_length_measurement_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(
+        train_case,
+        "get_dataset_len",
+        lambda loader: pytest.fail("loader should not be iterated"),
+    )
+
+    totals = train_case._dataset_lengths(object(), object(), enabled=False)
+
+    assert totals == (None, None)
+
+
+def test_unknown_dataset_length_uses_plateau_scheduler():
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.AdamW([parameter], lr=0.01)
+
+    scheduler = train_case._build_scheduler(optimizer, {}, total_t=None)
+
+    assert isinstance(scheduler, ReduceLROnPlateau)
+
+
+def test_known_dataset_length_uses_one_cycle_scheduler():
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.AdamW([parameter], lr=0.01)
+    config = {
+        "learning_rate": 0.01,
+        "epochs": 2,
+        "train_repeat": 1,
+        "pc_start": 0.3,
+        "div_factor": 10,
+        "final_div_factor": 100,
+    }
+
+    scheduler = train_case._build_scheduler(optimizer, config, total_t=4)
+
+    assert isinstance(scheduler, OneCycleLR)
+    assert scheduler.total_steps == 8
 
 
 def test_train_model_propagates_missing_dataset_error(tmp_path):

@@ -21,6 +21,36 @@ from utils import wrap_hist
 from tqdm import tqdm
 from typing import Union, Generator
 
+
+def _dataset_lengths(train_loader, val_loader, enabled: bool):
+    if not enabled:
+        return None, None
+
+    total_t = get_dataset_len(train_loader)
+    total_v = get_dataset_len(val_loader)
+    if total_t == 0:
+        raise RuntimeError("Training dataset produced no batches")
+    if total_v == 0:
+        raise RuntimeError("Validation dataset produced no batches")
+    return total_t, total_v
+
+
+def _build_scheduler(optimizer, training_dict: dict, total_t: int | None):
+    if total_t is None:
+        return ReduceLROnPlateau(optimizer, mode="min")
+
+    return OneCycleLR(
+        optimizer,
+        max_lr=training_dict['learning_rate'],
+        total_steps=total_t * training_dict['epochs'] * training_dict['train_repeat'],
+        pct_start=training_dict['pc_start'],
+        anneal_strategy='cos',
+        div_factor=training_dict['div_factor'],
+        final_div_factor=training_dict['final_div_factor'],
+        cycle_momentum=True,
+    )
+
+
 def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], None, None],
                                               Generator[tuple[None, dict], None, None]]:
     device_gpu = torch.device('cuda')
@@ -62,12 +92,11 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             max_seen=training_dict.get('max_seen', 10),
         )
 
-        total_t = get_dataset_len(trainLoader)
-        total_v = get_dataset_len(valLoader)
-        if total_t == 0:
-            raise RuntimeError("Training dataset produced no batches")
-        if total_v == 0:
-            raise RuntimeError("Validation dataset produced no batches")
+        total_t, total_v = _dataset_lengths(
+            trainLoader,
+            valLoader,
+            enabled=training_dict.get('measure_dataset_length', True),
+        )
 
         if training_dict['model'] is None:
             model = RandLANet(model_config=training_dict['model_config'],
@@ -95,16 +124,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         optimizer = optim.AdamW(model.parameters(), lr = training_dict['learning_rate'], weight_decay=training_dict['weight_decay'])
 
-        scheduler = OneCycleLR(
-            optimizer,
-            max_lr=training_dict['learning_rate'],  # Example: Adjust based on your LR range test
-            total_steps=total_t*training_dict['epochs']*training_dict['train_repeat'],
-            pct_start=training_dict['pc_start'],  # % of steps for warm-up
-            anneal_strategy='cos',  # Cosine annealing
-            div_factor=training_dict['div_factor'],  # Initial LR will be max_lr / x
-            final_div_factor=training_dict['final_div_factor'],  # Final LR
-            cycle_momentum=True  # Cycle momentum as well
-        )
+        scheduler = _build_scheduler(optimizer, training_dict, total_t)
 
         loss_hist = []
         acc_hist = []
@@ -164,7 +184,10 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                     loss_t.backward()
                     optimizer.step()
 
-                    if scheduler.last_epoch < scheduler.total_steps:
+                    if (
+                        isinstance(scheduler, OneCycleLR)
+                        and scheduler.last_epoch < scheduler.total_steps
+                    ):
                         scheduler.step()
 
                     # accuracy_t = calculate_weighted_accuracy(outputs, batch_y, weights=class_weights_t)
@@ -183,6 +206,9 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                         # "Acc_train": f"{avg_accuracy_t:.6f}",
                         "learning_rate": f"{current_lr:.10f}"
                     })
+
+                if epoch_samples_t == 0:
+                    raise RuntimeError("Training dataset produced no batches")
 
                 loss_hist.append(avg_loss_t)
                 acc_hist.append(-1.)  # Not computed for training
@@ -222,6 +248,11 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                             "Acc_val": f"{avg_accuracy_v:.6f}",
                             "mIoU_val": f"{avg_miou_v:.6f}"
                         })
+
+                if epoch_samples_v == 0:
+                    raise RuntimeError("Validation dataset produced no batches")
+                if isinstance(scheduler, ReduceLROnPlateau):
+                    scheduler.step(avg_loss_v)
 
                 loss_v_hist.append(avg_loss_v)
                 acc_v_hist.append(avg_accuracy_v)
