@@ -64,6 +64,10 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
         total_t = get_dataset_len(trainLoader)
         total_v = get_dataset_len(valLoader)
+        if total_t == 0:
+            raise RuntimeError("Training dataset produced no batches")
+        if total_v == 0:
+            raise RuntimeError("Validation dataset produced no batches")
 
         if training_dict['model'] is None:
             model = RandLANet(model_config=training_dict['model_config'],
@@ -242,11 +246,8 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                     "learning_rate_max": f"{training_dict['learning_rate']:.10f}"
                 })
 
-    except Exception as e:
-        print(f"Error during training: {e}")
-        try:
+    except Exception:
+        if "model" in locals():
             del model
-        except Exception as e:
-            pass
         torch.cuda.empty_cache()
-        yield None, {}
+        raise
