@@ -136,8 +136,9 @@ descriptive error.
 
 By default, training measures the iterable train and validation loaders before
 training so progress totals and `OneCycleLR` have a fixed step count. Set
-`"measure_dataset_length": false` in a training config to skip this preliminary
-pass. Progress bars will then use unknown totals and training will use
+`MEASURE_DATASET_LENGTH = False` near the top of
+`src/model_pipeline/_train_single_case.py` to skip this preliminary pass.
+Progress bars will then use unknown totals and training will use
 `ReduceLROnPlateau` based on validation loss instead.
 
 Mode `2` currently runs 80 Optuna trials. Change `n_trials` in `main()` if a

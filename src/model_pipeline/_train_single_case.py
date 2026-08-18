@@ -22,6 +22,9 @@ from tqdm import tqdm
 from typing import Union, Generator
 
 
+MEASURE_DATASET_LENGTH = True
+
+
 def _dataset_lengths(train_loader, val_loader, enabled: bool):
     if not enabled:
         return None, None
@@ -95,7 +98,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         total_t, total_v = _dataset_lengths(
             trainLoader,
             valLoader,
-            enabled=training_dict.get('measure_dataset_length', True),
+            enabled=MEASURE_DATASET_LENGTH,
         )
 
         if training_dict['model'] is None:
