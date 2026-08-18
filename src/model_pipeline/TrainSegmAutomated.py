@@ -3,10 +3,8 @@ matplotlib.use('Agg')
 
 
 import pathlib as pth
-import numpy as np
 from pprint import pprint
-from typing import Union, Sequence
-import itertools
+from typing import Union
 import sys
 import argparse
 import logging
@@ -25,11 +23,15 @@ from tqdm import tqdm
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from _train_single_case import train_model
+try:
+    from ._train_single_case import train_model
+    from .RandLANet_CB import RandLANet
+except ImportError:
+    from _train_single_case import train_model
+    from RandLANet_CB import RandLANet
+
 from utils import load_json, save2json, save_model, convert_str_values
 from utils import Plotter
-
-from RandLANet_CB import RandLANet
 
 
 def check_models(model_configs_paths: list[pth.Path],
@@ -47,7 +49,8 @@ def check_models(model_configs_paths: list[pth.Path],
 
     # check each model if it compiles and take not more than max memory
     model_configs = []
-    for index, model_config_path in enumerate(model_configs_paths.copy()):
+    valid_config_paths = []
+    for model_config_path in model_configs_paths:
         model_config = load_json(model_config_path)
         model_config = convert_str_values(model_config)
 
@@ -68,25 +71,14 @@ def check_models(model_configs_paths: list[pth.Path],
         except Exception as e:
             if verbose:
                 print(f"Error compiling model {model_config_path.name}:\n{e}")
-            model_configs_paths.pop(index)
         else:
-            model_configs.append(model_config)  
-    
-    return model_configs, model_configs_paths
+            model_configs.append(model_config)
+            valid_config_paths.append(model_config_path)
 
-def get_step_list(param_value_list: list[Union[int, float]]) -> list[Union[int, float]]:
-    """"Generate a list of values based on the given parameter value and type of list elements."""
+    return model_configs, valid_config_paths
 
-    start, stop, step = param_value_list
-    
-    if all(isinstance(x, int) for x in [start, stop, step]):
-        return list(range(int(start), int(stop + step), int(step)))
-    elif all(isinstance(x, (int, float)) for x in [start, stop, step]):
-        return [float(x) for x in np.arange(float(start), float(stop + step), float(step))]
-    else:
-        raise ValueError(f"Invalid parameter values: {param_value_list}. Must be all int or all float.")
 
-def get_factor_list(param_value_list: list[Union[float]]) -> list[Union[float]]:
+def get_factor_list(param_value_list: list[float]) -> list[float]:
     """"Generate a list of values based on the given parameter value of list elements."""
 
     start, stop, factor = param_value_list
@@ -101,73 +93,6 @@ def get_factor_list(param_value_list: list[Union[float]]) -> list[Union[float]]:
     factor_list.sort()
     return factor_list
 
-    
-
-def generate_experiment_configs(training_config: dict, 
-                                model_configs_list: Sequence[dict]) -> list[dict]:
-    logger = logging.getLogger(__name__)
-    logger.info(f'START: generate_experiment_config.')
-    
-    device = torch.device('cuda')
-    logger.info(f'Using device: {device}')
-
-    dynamic_params = {}
-    static_params = {}
-
-    # Separate dynamic and model, base_path=base_path, existing_ok=Truestatic parameters
-
-    for key, value in training_config.items():
-        
-        if "comment" in key.lower():
-            continue
-        
-        elif isinstance(value, list) and len(value) > 1 and not 'samples_len' in key.lower():
-            if "learning_rate" in key.lower() or "weight_decay" in key.lower():
-                dynamic_params[key] = get_factor_list(training_config[key])
-            else:
-                dynamic_params[key] = get_step_list(value)
-
-        elif 'samples_len' in key.lower():
-            samples_len = get_step_list(value)
-            static_params[key] = samples_len
-        else:
-            static_params[key] = value
-
-    static_params['device'] = device
-    
-    logger.info(f'Generated {len(dynamic_params)} dynamic parameters.')
-    logger.info(f'Generated {len(static_params)} static parameters.')
-
-    # Generate all combinations of dynamic parameters
-    keys = dynamic_params.keys()
-    values_lists = dynamic_params.values()
-    combinations = list(itertools.product(*values_lists))
-
-    
-    # Create experiment configurations
-    exp_configs = []
-    for combo in combinations:
-        combo_dict = dict(zip(keys, combo))
-        combo_dict.update(static_params)
-
-        for model_config in model_configs_list:
-            
-            # get model config
-            dynamic_config = dict(zip(keys, combo))
-            
-            exp_config = static_params.copy()
-            exp_config.update(dynamic_config)
-            exp_config['model_config'] = model_config
-            exp_config['model_config']['num_classes'] = exp_config['num_classes']
-            
-            exp_configs.append(exp_config)
-        
-    logger.info(f'Generated {len(exp_configs)} experiment configurations.')
-    logger.info(f'STOP: generate_experiment_config')
-
-
-    return exp_configs
-
 
 
 def load_config(base_dir: Union[str, pth.Path], mode: int = 0) -> list[dict]:
@@ -175,33 +100,34 @@ def load_config(base_dir: Union[str, pth.Path], mode: int = 0) -> list[dict]:
     """
     Load configuration files and prepare experiment configurations for training.
     mode:
-    0 - single_training
-    1 - multiple trainings, grid_based
+    0 - test
+    1 - single training
     2 - multiple trainings, with optuna
     
     """
     logger = logging.getLogger(__name__)
-    logger.info(f'START: case_based_training.')
+    logger.info('START: load_config.')
 
-    if isinstance(mode, int):
-        if mode not in [0, 1, 2, 3]:
-            raise ValueError(f"Invalid mode: {mode}. Must be:\n" \
-                             "0 - test" \
-                             "1 - single_training," \
-                             "2 - multiple trainings, grid_based," \
-                             "3 - multiple trainings, with optuna.")
+    if mode not in (0, 1, 2):
+        raise ValueError(
+            f"Invalid mode: {mode}. Must be 0 (test), 1 (single training), "
+            "or 2 (Optuna training)."
+        )
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for training")
 
     base_dir = pth.Path(base_dir)
     config_files_dir = base_dir.joinpath('training_configs')
     model_configs_dir = base_dir.joinpath('model_configs')
 
-    model_configs_paths_list = list(model_configs_dir.rglob('*.json'))
+    model_configs_paths_list = sorted(model_configs_dir.rglob('*.json'))
     logger.info(f'Found {len(model_configs_paths_list)} model configs in dir {model_configs_dir}')
 
 
     if mode == 0 or mode == 1:
         training_config = load_json(config_files_dir.joinpath('config_train_single.json'))
-    elif mode == 2 or mode == 3:
+    elif mode == 2:
         training_config = load_json(config_files_dir.joinpath('config_train.json'))
     
     logger.info(f'Loaded training config for mode: {mode}.')
@@ -212,12 +138,17 @@ def load_config(base_dir: Union[str, pth.Path], mode: int = 0) -> list[dict]:
         model_configs_paths_list = [p for p in model_configs_paths_list if "single" not in p.stem]
     
     training_config = convert_str_values(training_config)
-    model_configs_list, _ = check_models(model_configs_paths_list, max_input_size=(8, 2*8192, 4), max_memory_GB=32)
+    model_configs_list, _ = check_models(model_configs_paths_list, max_memory_GB=32)
     
-    assert model_configs_list != 0, "No models compiled. Check model_configs - most likely too big models are defined"
+    if not model_configs_list:
+        raise RuntimeError(
+            "No models compiled. Check model_configs; configured models may be too large"
+        )
 
-    if mode == 3:
-        training_config['device'] = torch.device('cuda')
+    device = torch.device('cuda')
+    if mode == 2:
+
+        training_config['device'] = device
         
         logger.info(f'Loaded device: {device}')
         logger.info(f'STOP: load_config. All files loaded.')
@@ -226,12 +157,13 @@ def load_config(base_dir: Union[str, pth.Path], mode: int = 0) -> list[dict]:
 
         return [training_config, model_configs_list]
     else:
-        exp_configs = generate_experiment_configs(
-            training_config,
-            model_configs_list,
-        )
-        
         logger.info(f'STOP: load_config. All files loaded.')
+
+        training_config['model'] = None
+        training_config['model_config'] = model_configs_list[0]
+        training_config['device'] = device
+
+        exp_configs = [training_config]
 
         return exp_configs
 
@@ -246,11 +178,12 @@ def test_case(exp_config: dict) -> None:
     exp_config['epochs'] = 2
     
     try:
-        for _, _ in train_model(training_dict=exp_config):
-            pass
-    except Exception as e:
-        logger.error(f'ERROR: test_case. Error message: {e}')
-        print(f"Error training model (TESTING_MODE):\n{e}")
+        for model, result_hist in train_model(training_dict=exp_config):
+            if model is None or not result_hist:
+                raise RuntimeError("Training returned no model or result history")
+    except Exception:
+        logger.exception('ERROR: test_case failed.')
+        raise
     logger.info('STOP: test_case passed.')
 
 class Checkpoint: 
@@ -297,7 +230,7 @@ class Checkpoint:
             self.final_val_best = final_val
         
         if not self.save_new:
-            return [model, exp_config, config_path]
+            return model, exp_config, config_path
 
         if not self.existing_ok:
                 for file_path in plot_dir.iterdir():
@@ -311,7 +244,7 @@ class Checkpoint:
         logger.info(f'New best model saved to: {model_path}. model_name: {model_name}')
 
 
-        best_config = exp_config
+        best_config = exp_config.copy()
         best_config['device'] = str(best_config['device'])
 
         config_path = dict_files_dir.joinpath(f'{model_path.stem}_config.json')
@@ -374,30 +307,43 @@ def case_based_training(exp_configs: list[dict],
 
     logger.info('Case based training starting.')
     checkpoint = Checkpoint(existing_ok=False)
-
+    last_model = None
+    config_path = None
 
     for i, exp_config in pbar:
         logger.info(f'Case {i+1}/{len(exp_configs)}: {exp_config}')
 
         for model, result_hist in train_model(training_dict=exp_config):
+            if model is None or not result_hist:
+                raise RuntimeError("Training returned no model or result history")
+
             logger.info(f'Single model was generated. val_acc: {result_hist["acc_v_hist"][-1]:.3f}  val_loss: {result_hist["loss_v_hist"][-1]:.3f}')
 
             final_val = result_hist['acc_v_hist'][-1]*0.6 + (1 / (1 + result_hist['loss_v_hist'][-1]))*0.4
 
-            model, best_config, config_path, result_hist = checkpoint.check_checkpoint(model, model_name, final_val, exp_config, result_hist)
-    
+            last_model, _, config_path = checkpoint.check_checkpoint(
+                model,
+                model_name,
+                final_val,
+                exp_config,
+                result_hist,
+            )
+
+    if last_model is None or config_path is None:
+        raise RuntimeError("Training produced no epochs")
+
     logger.info(f'Best model saved to: {model_path}')
     logger.info(f'Best config saved to: {config_path}')
     logger.info('STOP: case_based_training')
 
-    summary(model)
+    summary(last_model)
 
 
 def objective_function(trial: optuna.Trial,
-                       exp_config: list[dict], # exp config, converted from str
+                       exp_config: dict,
                        model_name: str,
                        model_configs_list: list[dict],
-                       checkpoint: object) -> float:
+                       checkpoint: Checkpoint) -> float:
     
     """
     Objective function for Optuna
@@ -406,14 +352,8 @@ def objective_function(trial: optuna.Trial,
     logger = logging.getLogger(__name__)
     logger.info(f'START: objective_function')
 
-    existing_ok = False
-
-
     model_config_index = trial.suggest_categorical('model_config_index', range(len(model_configs_list)))
-    model_config = model_configs_list[model_config_index]
-
-    batch_size = get_step_list(exp_config['batch_size'])
-    epochs = get_step_list(exp_config['epochs'])
+    model_config = model_configs_list[model_config_index].copy()
 
     lr = trial.suggest_categorical('learning_rate', get_factor_list(exp_config['learning_rate']))
     weight_decay = trial.suggest_categorical('weight_decay', get_factor_list(exp_config['weight_decay']))
@@ -427,6 +367,8 @@ def objective_function(trial: optuna.Trial,
     fin_div_factor = trial.suggest_int('final_div_factor', exp_config['final_div_factor'][0], exp_config['final_div_factor'][1], log=True)
     num_neighbors = trial.suggest_int('num_neighbors', exp_config['num_neighbors'][0], exp_config['num_neighbors'][1], step = exp_config['num_neighbors'][2])
     num_points = trial.suggest_int('num_points', exp_config['num_points'][0], exp_config['num_points'][1], step = exp_config['num_points'][2])
+
+
 
     model_config.update({
         'num_neighbors': num_neighbors
@@ -462,6 +404,7 @@ def objective_function(trial: optuna.Trial,
     best_val_accuracy = 0.0
     best_val_loss = float('inf')
     best_val_miou = 0.0
+    final_val = None
 
     for epoch_idx, (model, result_hist) in enumerate(train_model(training_dict=exp_config)):
         
@@ -499,11 +442,15 @@ def objective_function(trial: optuna.Trial,
             logger.info(f'Pruning trial: {trial.number}')
             raise optuna.exceptions.TrialPruned()
         
+    if final_val is None:
+        raise RuntimeError("Training produced no epochs")
+
     logger.info(f'STOP: objective_function')
 
     return final_val
 
-def optuna_based_training(exp_config: list[dict], # only one, non converted conf given in list
+
+def optuna_based_training(exp_config: list,
                           model_name: str,
                           n_trials: int = 100) -> None:
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -560,7 +507,7 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
     
     pbar.close()
     best_trial = study.best_trial
-    best_params = best_trial.params
+    best_params = best_trial.params.copy()
     best_value = best_trial.value
 
     logger.info(f'Optimization finished. Best value of formula: 0.6 * val_acc + 0.4 * norm_val_loss: {best_value:.4f}')
@@ -572,7 +519,9 @@ def optuna_based_training(exp_config: list[dict], # only one, non converted conf
     print(20*'=')
 
 
-    best_model_config = model_configs[best_params.pop('model_config_index')] 
+    best_model_config = model_configs[best_params.pop('model_config_index')].copy()
+    best_model_config['num_neighbors'] = best_params['num_neighbors']
+    best_model_config['num_classes'] = exp_config['num_classes']
 
     final_exp_config = exp_config.copy()
     final_exp_config.update(best_params)
@@ -593,10 +542,9 @@ def argparser(args=None):
     """
     Parse command-line arguments for automated CNN training pipeline configuration.
     Accepts model naming and training mode selection.
-    Returns parsed arguments with validation for device choices and formatted help text display.
+    Returns parsed arguments with validated mode choices.
     """
 
-    default_name = 'ResNet_0'
     parser = argparse.ArgumentParser(
         description="Script for training the model based on predefined range of scenarios",
         formatter_class=argparse.RawTextHelpFormatter
@@ -605,11 +553,10 @@ def argparser(args=None):
     parser.add_argument(
         '--model_name',
         type=str,
-        default=default_name,
+        required=True,
         help=(
             "Base of the model's name.\n"
-            "When iterating, name also gets an ID. \n"
-            f"If not given, defaults to: {default_name}."
+            "When iterating, name also gets an ID."
         )
     )
 
@@ -617,15 +564,14 @@ def argparser(args=None):
         '--mode',
         type=int,
         default=0,
-        choices=[0, 1, 2, 3, 4], # choice limit
+        choices=[0, 1, 2, 3], # choice limit
         help=(
             "Training mode.\n"
             'Pick:\n'
             '0: test\n'
             '1: single training\n'
-            '2: multiple trainings, grid_based\n'
-            '3: multiple trainings, with optuna\n'
-            '4: only check models'
+            '2: multiple trainings, with optuna\n'
+            '3: only check models'
         )
     )
 
@@ -664,31 +610,29 @@ def main():
     model_name = args.model_name
 
     base_path = pth.Path(__file__).parent
-    if args.mode != 4:
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is required for training")
+    if args.mode != 3:
         exp_configs = load_config(base_path, mode=args.mode)
 
     if args.mode == 0:
         test_case(exp_config=exp_configs[0])
-    elif args.mode == 1 or args.mode==2:
+    elif args.mode == 1:
         case_based_training(exp_configs=exp_configs,
                             model_name=model_name)
-    elif args.mode == 3:
+    elif args.mode == 2:
         optuna_based_training(exp_config=exp_configs,
                               model_name=model_name,
                               n_trials=80)
-    elif args.mode == 4:
+    elif args.mode == 3:
         model_configs_dir = base_path.joinpath('model_configs')
-        model_configs_paths_list = list(model_configs_dir.rglob('*.json'))
+        model_configs_paths_list = sorted(model_configs_dir.rglob('*.json'))
 
-        check_models(model_configs_paths=model_configs_paths_list, 
-                     max_input_size=(1, 8192, 4), 
-                     max_memory_GB=20,
-                     verbose=True)
+        check_models(
+            model_configs_paths=model_configs_paths_list,
+            max_input_size=(1, 8192, 4),
+            max_memory_GB=20,
+            verbose=True,
+        )
 
-        
 
 if __name__ == '__main__':
-    
-    main()  
+    main()
