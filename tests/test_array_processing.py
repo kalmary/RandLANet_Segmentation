@@ -18,6 +18,43 @@ class IntensityModel(torch.nn.Module):
         return torch.stack((1.0 - intensity, intensity), dim=1) * 8.0
 
 
+def test_segmenter_loads_config_and_checkpoint_from_separate_directories(
+    tmp_path,
+    monkeypatch,
+):
+    config_dir = tmp_path / 'dict_files'
+    model_dir = tmp_path / 'models'
+    loaded = {}
+
+    def load_config(self, path):
+        loaded['config_dir'] = path
+        return {
+            'model_config': {},
+            'num_points': 16,
+            'batch_size': 2,
+            'num_classes': 3,
+        }
+
+    def load_model(self, path):
+        loaded['model_dir'] = path
+        return IntensityModel()
+
+    monkeypatch.setattr(array_processing.SegmentClass, '_load_config', load_config)
+    monkeypatch.setattr(array_processing.SegmentClass, '_load_model', load_model)
+
+    instance = array_processing.SegmentClass(
+        model_name='model_1',
+        config_dir=config_dir,
+        model_dir=model_dir,
+    )
+
+    assert loaded == {
+        'config_dir': config_dir,
+        'model_dir': model_dir,
+    }
+    assert instance.config['num_classes'] == 3
+
+
 @pytest.fixture
 def segmenter():
     instance = array_processing.SegmentClass.__new__(
@@ -165,14 +202,17 @@ def test_segment_pcd_returns_labels_for_original_dense_points(
         'voxel_subsample_vectorized',
         subsample,
     )
-    monkeypatch.setattr(
-        segmenter,
-        '_segment_subsampled',
-        lambda *_: np.array([1, 0], dtype=np.int8),
-    )
+    captured = {}
+
+    def segment_subsampled(subsampled_points, subsampled_intensity):
+        captured['intensity'] = subsampled_intensity.copy()
+        return np.array([1, 0], dtype=np.int8)
+
+    monkeypatch.setattr(segmenter, '_segment_subsampled', segment_subsampled)
 
     labels = segmenter.segment_pcd(points, intensity)
 
+    np.testing.assert_allclose(captured['intensity'], [0.0, 0.5])
     np.testing.assert_array_equal(labels, [1, 1, 0, 0])
     np.testing.assert_array_equal(points, original_points)
     assert labels.dtype == np.int8

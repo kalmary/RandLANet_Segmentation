@@ -128,15 +128,18 @@ Available flags:
   - `2` — Optuna optimization using `config_train.json`,
   - `3` — compile model configs and estimate their resource requirements.
 
-Grid search is no longer supported. Training uses `FocalLoss` with class weights
+Training uses `FocalLoss` with class weights
 computed by `compute_pos_weights_prob()` from the labels in column `4` of every
-NPY tile. Missing directories, directories without NPY tiles, malformed tiles,
-empty tiles, and labels outside the configured classes stop training with a
-descriptive error.
+NPY tile. Sampling itself is class-independent: crop centers follow a spatial
+possibility score and each tile point must occur in at least one crop. Missing
+directories, directories without NPY tiles, malformed tiles, empty tiles, and
+labels outside the configured classes stop training with a descriptive error.
 
-Training does not run a preliminary pass to measure the iterable loaders.
-Progress bars therefore use unknown totals, and `ReduceLROnPlateau` adjusts the
-learning rate once per epoch based on validation loss.
+Before training, both iterable loaders are traversed once to measure progress
+bar and `OneCycleLR` step counts. Every `train_repeat` is an independent run with
+a fresh model, optimizer, scheduler, loss instances, and metric histories. The
+outer checkpoint logic selects the best epoch across all repetitions using
+ordinary validation accuracy and validation loss.
 
 Mode `2` currently runs 80 Optuna trials. Change `n_trials` in `main()` if a
 different optimization budget is required. The best model, its config, and
@@ -146,27 +149,26 @@ Use `--help` to display the current CLI options.
 
 ## 3. Evaluation <a name="evaluation"></a>
 
-Evaluation is CUDA-only and uses the test dataset configured in the saved model
-config. Run it from the repository root:
+Evaluation is CUDA-only and runs dense inference on the original LAS/LAZ test
+clouds. Run it from the repository root:
 
 ```bash
-python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --mode 1
+python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --input_path path/to/raw/test
 ```
 
 `MODEL_NAME` is the trained filename without `.pt`, for example
-`RandLANetTest_123`. Available modes are:
+`RandLANetTest_123`. `--input_path` can point to one LAS/LAZ file or a directory.
+If it is omitted, evaluation uses `data_path_test_raw` from the saved model
+config when available, otherwise it falls back to `data_path_test`.
 
-- `0` — verify that the trained model compiles and can run,
-- `1` — evaluate the model and generate outputs.
-
-Evaluation uses the same probabilistic class weights and `FocalLoss` as
-training. Dataset validation rejects missing directories, missing NPY tiles,
-malformed or empty tiles, missing matching PKL trees, and invalid labels before
-metrics are generated.
-
-Evaluation outputs include precision-recall and ROC curves, a confusion matrix,
-and a text classification report. Copy selected trained models and configs to
-`src/final_files/` for inference.
+The inference pipeline applies the same voxel subsampling, intensity
+normalization, tiling, voting, and dense nearest-neighbor upsampling as
+`SegmentClass`. Metrics include every classified source point (`classification
+!= 0`) exactly once; LAS classes are converted from `1..N` to model labels
+`0..N-1`. Unclassified points are segmented for spatial context but excluded
+from metrics. Evaluation reports ordinary accuracy and mIoU and creates a
+confusion matrix and text classification report. Copy selected trained models
+and configs to `src/final_files/` for inference.
 
 # 5. Final data processing <a name="pipelines"></a>
 
@@ -220,8 +222,9 @@ Tests use pytest:
 python -m pytest -q
 ```
 
-The persistent DataLoader test starts a multiprocessing worker and therefore
-requires an environment that permits process synchronization primitives.
+The DataLoader uses one non-persistent spawned worker per traversal, so tests
+that iterate it require an environment that permits process synchronization
+primitives.
 
 # 7. Citation <a name="citation"></a>
 

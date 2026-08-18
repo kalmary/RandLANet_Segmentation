@@ -1,21 +1,15 @@
 import pathlib
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
-import torch
 
 
 project_root = pathlib.Path(__file__).resolve().parents[1]
 sys.path.append(str(project_root))
 
 from src.model_pipeline import EvalSegm_RandLANet as evaluation
-
-
-class FixedModel(torch.nn.Module):
-    def forward(self, points):
-        scores = points[..., 0]
-        return torch.stack((-scores, scores), dim=1)
 
 
 class PlotRecorder:
@@ -26,13 +20,18 @@ class PlotRecorder:
         self.plots_dir = plots_dir
 
     def cnf_matrix(self, *args, **kwargs):
-        self.calls.append("confusion")
+        self.calls.append('confusion')
 
-    def prc_curve(self, *args, **kwargs):
-        self.calls.append("precision_recall")
 
-    def roc_curve(self, *args, **kwargs):
-        self.calls.append("roc")
+class FakeSegmenter:
+    def __init__(self, predictions, n_classes=2):
+        self.predictions = np.asarray(predictions)
+        self.n_classes = n_classes
+        self.calls = []
+
+    def segment_pcd(self, points, intensity):
+        self.calls.append((points.copy(), intensity.copy()))
+        return self.predictions[:len(points)]
 
 
 @pytest.fixture(autouse=True)
@@ -40,168 +39,162 @@ def reset_plot_recorder():
     PlotRecorder.calls = []
 
 
-def test_inference_collects_outputs_before_metrics(monkeypatch):
-    batches = [
-        (
-            torch.tensor([[[-2.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0]]]),
-            torch.tensor([[0, 1]]),
-        ),
-        (
-            torch.tensor([[[3.0, 0.0, 0.0, 0.0], [-3.0, 0.0, 0.0, 0.0]]]),
-            torch.tensor([[1, 0]]),
-        ),
-    ]
-    config = {
-        "data_path_test": "unused",
-        "num_classes": 2,
-        "num_points": 2,
-        "batch_size": 1,
-        "query_workers": 3,
-        "max_seen": 4,
-        "device": torch.device("cpu"),
-    }
-    weights = torch.tensor([0.5, 1.0])
-    loader_calls = []
+@pytest.fixture
+def raw_file(tmp_path):
+    path = tmp_path / 'cloud.las'
+    path.touch()
+    return path
 
-    def make_loader(**kwargs):
-        loader_calls.append(kwargs)
-        return batches, object()
+
+def fake_cloud(labels):
+    point_count = len(labels)
+    return SimpleNamespace(
+        x=np.arange(point_count, dtype=np.float64),
+        y=np.arange(point_count, dtype=np.float64) + 10.0,
+        z=np.arange(point_count, dtype=np.float64) + 20.0,
+        intensity=np.arange(point_count, dtype=np.uint16),
+        classification=np.asarray(labels, dtype=np.uint8),
+    )
+
+
+def test_input_files_find_raw_clouds_and_ignore_modified_outputs(tmp_path):
+    expected = [tmp_path / 'a.las', tmp_path / 'nested' / 'b.laz']
+    (tmp_path / 'nested').mkdir()
+    for path in expected + [tmp_path / 'ignored_mod.las', tmp_path / 'other.npy']:
+        path.touch()
+
+    assert evaluation._input_files(tmp_path) == expected
+    assert evaluation._input_files(expected[0]) == [expected[0]]
+    assert evaluation._input_files(tmp_path / 'other.npy') == []
+
+
+def test_collect_labels_evaluates_each_assessed_dense_point_once(
+    raw_file,
+    monkeypatch,
+):
+    cloud = fake_cloud([0, 1, 2, 1])
+    segmenter = FakeSegmenter([1, 0, 1, 0])
+    monkeypatch.setattr(evaluation.laspy, 'read', lambda path: cloud)
+
+    predictions, targets = evaluation.collect_labels(segmenter, raw_file)
+
+    np.testing.assert_array_equal(predictions, [0, 1, 0])
+    np.testing.assert_array_equal(targets, [0, 1, 0])
+    assert len(segmenter.calls) == 1
+    points, intensity = segmenter.calls[0]
+    assert points.shape == (4, 3)
+    np.testing.assert_array_equal(intensity, [0, 1, 2, 3])
+
+
+def test_collect_labels_skips_unclassified_files_and_rejects_empty_result(
+    raw_file,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        evaluation.laspy,
+        'read',
+        lambda path: fake_cloud([0, 0, 0]),
+    )
+
+    with pytest.raises(RuntimeError, match='no classified points'):
+        evaluation.collect_labels(FakeSegmenter([0, 0, 0]), raw_file)
+
+
+def test_collect_labels_validates_target_and_prediction_ranges(raw_file, monkeypatch):
+    monkeypatch.setattr(
+        evaluation.laspy,
+        'read',
+        lambda path: fake_cloud([1, 3]),
+    )
+    with pytest.raises(ValueError, match='model has 2 classes'):
+        evaluation.collect_labels(FakeSegmenter([0, 1]), raw_file)
 
     monkeypatch.setattr(
-        evaluation,
-        "compute_pos_weights_prob",
-        lambda **kwargs: weights,
+        evaluation.laspy,
+        'read',
+        lambda path: fake_cloud([1, 2]),
     )
-    monkeypatch.setattr(evaluation, "make_loader", make_loader)
-
-    outputs, labels, result_weights = evaluation._eval_model(config, FixedModel())
-
-    assert outputs.shape == (2, 2, 2)
-    assert torch.equal(labels, torch.tensor([[0, 1], [1, 0]]))
-    assert torch.equal(result_weights, weights)
-    assert len(loader_calls) == 1
-    loader_args = loader_calls[0]
-    np.testing.assert_array_equal(
-        loader_args.pop("pos_weights"),
-        np.array([0.5, 1.0], dtype=np.float32),
-    )
-    assert loader_args == {
-        "data_dir": "unused",
-        "num_points": 2,
-        "batch_size": 1,
-        "query_workers": 3,
-        "shuffle": False,
-        "max_seen": 4,
-    }
+    with pytest.raises(ValueError, match='Predictions outside'):
+        evaluation.collect_labels(FakeSegmenter([0, 2]), raw_file)
 
 
-def test_parser_does_not_offer_an_unused_device():
-    args = evaluation.parser(["--model_name", "RandLANet_1"])
+def test_collect_labels_rejects_missing_files_and_invalid_limit(tmp_path):
+    with pytest.raises(FileNotFoundError, match='No LAS or LAZ'):
+        evaluation.collect_labels(FakeSegmenter([]), tmp_path)
 
-    assert not hasattr(args, "device")
-
-
-def test_prob_weights_reject_missing_dataset_directory(tmp_path):
-    missing = tmp_path / "missing"
-
-    with pytest.raises(FileNotFoundError, match="does not exist"):
-        evaluation.compute_pos_weights_prob(missing, num_classes=2)
-
-
-def test_prob_weights_reject_empty_dataset_directory(tmp_path):
-    with pytest.raises(FileNotFoundError, match="No .npy point-cloud tiles"):
-        evaluation.compute_pos_weights_prob(tmp_path, num_classes=2)
+    raw_file = tmp_path / 'cloud.las'
+    raw_file.touch()
+    with pytest.raises(ValueError, match='cannot be negative'):
+        evaluation.collect_labels(
+            FakeSegmenter([]),
+            raw_file,
+            max_points_per_file=-1,
+        )
 
 
-def test_prob_weights_reject_malformed_or_empty_tiles(tmp_path):
-    malformed = tmp_path / "malformed.npy"
-    np.save(malformed, np.zeros((4, 4), dtype=np.float32))
-
-    with pytest.raises(ValueError, match=r"Expected \(N, 5\) data"):
-        evaluation.compute_pos_weights_prob(tmp_path, num_classes=2)
-
-    malformed.unlink()
-    np.save(tmp_path / "empty.npy", np.zeros((0, 5), dtype=np.float32))
-
-    with pytest.raises(ValueError, match="contains no points"):
-        evaluation.compute_pos_weights_prob(tmp_path, num_classes=2)
-
-
-def test_prob_weights_count_point_labels(tmp_path):
-    tile = np.zeros((4, 5), dtype=np.float32)
-    tile[:, 4] = [0, 0, 0, 1]
-    np.save(tmp_path / "scan_source_tile_000_000.npy", tile)
-
-    weights = evaluation.compute_pos_weights_prob(
-        data_dir=tmp_path,
-        num_classes=2,
-        power=0.5,
-    )
-
-    assert isinstance(weights, torch.Tensor)
-    torch.testing.assert_close(
-        weights,
-        torch.tensor([1.0 / np.sqrt(3.0), 1.0], dtype=torch.float32),
-    )
-
-
-def test_metrics_use_all_points_and_supplied_weights():
-    outputs = torch.tensor([
-        [
-            [4.0, 4.0, 4.0, -4.0],
-            [-4.0, -4.0, -4.0, 4.0],
-        ]
-    ])
-    labels = torch.tensor([[0, 0, 1, 1]])
-    weights = torch.tensor([0.5, 1.0])
-
+def test_metrics_use_dense_predictions_once():
     metrics = evaluation.calculate_metrics(
-        outputs=outputs,
-        labels=labels,
-        class_weights=weights,
+        predictions=np.array([0, 0, 0, 1]),
+        targets=np.array([0, 0, 1, 1]),
         num_classes=2,
-        focal_loss_gamma=1.0,
     )
 
-    assert metrics["accuracy"] == pytest.approx(0.75)
-    assert metrics["weighted_accuracy"] == pytest.approx(0.5)
-    assert metrics["miou"] == pytest.approx(7.0 / 12.0)
-    np.testing.assert_allclose(metrics["class_iou"], [2.0 / 3.0, 0.5])
-    assert metrics["probabilities"].shape == (4, 2)
-    np.testing.assert_array_equal(metrics["labels"], [0, 0, 1, 1])
-    np.testing.assert_array_equal(metrics["predictions"], [0, 0, 0, 1])
+    assert metrics['accuracy'] == pytest.approx(0.75)
+    assert metrics['miou'] == pytest.approx(7.0 / 12.0)
+    np.testing.assert_allclose(metrics['class_iou'], [2.0 / 3.0, 0.5])
+    np.testing.assert_array_equal(metrics['predictions'], [0, 0, 0, 1])
+    np.testing.assert_array_equal(metrics['targets'], [0, 0, 1, 1])
 
 
-def test_frontend_finalizes_metrics_then_creates_all_outputs(tmp_path, monkeypatch):
-    outputs = torch.tensor([[[4.0, -4.0], [-4.0, 4.0]]])
-    labels = torch.tensor([[0, 1]])
-    weights = torch.tensor([0.5, 1.0])
-    config = {
-        "num_classes": 2,
-        "focal_loss_gamma": 1.0,
-    }
-    plot_dir = tmp_path / "plots"
+def test_metrics_reject_mismatched_or_empty_arrays():
+    with pytest.raises(ValueError, match='same shape'):
+        evaluation.calculate_metrics([0], [0, 1], num_classes=2)
+    with pytest.raises(ValueError, match='cannot be empty'):
+        evaluation.calculate_metrics([], [], num_classes=2)
+
+
+def test_frontend_creates_confusion_matrix_and_report(tmp_path, monkeypatch):
+    segmenter = FakeSegmenter([0, 1])
+    plot_dir = tmp_path / 'plots'
     report = {}
 
-    def record_report(**kwargs):
-        report.update(kwargs)
-
     monkeypatch.setattr(
         evaluation,
-        "_eval_model",
-        lambda config_dict, model: (outputs, labels, weights),
+        'collect_labels',
+        lambda *args, **kwargs: (np.array([0, 1]), np.array([0, 1])),
     )
-    monkeypatch.setattr(evaluation, "Plotter", PlotRecorder)
-    monkeypatch.setattr(evaluation, "ClassificationReport", record_report)
-
-    evaluation.eval_model_front(
-        config_dict=config,
-        model=FixedModel(),
-        paths=[pathlib.Path("model_config.json"), plot_dir],
+    monkeypatch.setattr(evaluation, 'Plotter', PlotRecorder)
+    monkeypatch.setattr(
+        evaluation,
+        'ClassificationReport',
+        lambda **kwargs: report.update(kwargs),
     )
 
+    metrics = evaluation.eval_model_front(
+        segmenter=segmenter,
+        input_path=tmp_path,
+        model_path=pathlib.Path('model.pt'),
+        plot_dir=plot_dir,
+    )
+
+    assert metrics['accuracy'] == 1.0
     assert plot_dir.is_dir()
-    assert PlotRecorder.calls == ["confusion", "precision_recall", "roc"]
-    assert "Accuracy:" in report["additional_info"]
-    assert "Weighted accuracy:" in report["additional_info"]
-    assert "mIoU:" in report["additional_info"]
+    assert PlotRecorder.calls == ['confusion']
+    assert 'Accuracy:' in report['additional_info']
+    assert 'mIoU:' in report['additional_info']
+    assert 'Loss:' not in report['additional_info']
+
+
+def test_parser_validates_model_name_and_optional_raw_input(raw_file):
+    args = evaluation.parser([
+        '--model_name', 'RandLANet_1',
+        '--input_path', str(raw_file),
+    ])
+
+    assert args.model_name == 'RandLANet_1'
+    assert args.input_path == raw_file
+    assert not hasattr(args, 'device')
+    assert not hasattr(args, 'mode')
+
+    with pytest.raises(SystemExit):
+        evaluation.parser(['--model_name', 'RandLANet_1.pt'])
