@@ -15,22 +15,25 @@
 ---
 # 1. Overview <a name="overview"></a>
 
-**RandLANet_Segmentation** is a set of tools for point cloud semantic segmentation using the RandLANet architecture. RandLANet is a deep learning model designed to process large-scale point clouds. The repository includes tools for defining the model, training it, and performing segmentation on new files. Key Features:
-- Data preprocessing: cut, decimate and distribute data for training model,
-- Model definition: necessary code to define and build the RandLANet model architecture, allows for scalability and adjustment for hardware-specific needs,
-- Training & Evaluation: Tools for training the model on custom datasets and evaluating its performance,
-- Inference & Segmentation: Utility to perform semantic segmentation on new point cloud files using pre-trained models/ segmentation on preloaded arrays.
+**RandLANet_Segmentation** provides preprocessing, training, evaluation, and
+inference tools for semantic segmentation of large LAS/LAZ point clouds with a
+configurable RandLA-Net model.
 
+Main functionality:
 
-You can see the RandLANet scheme from original paper [[1]](#cite1) on the picture below:
+- preprocessing raw point clouds into paired NPY tiles and PKL KD-trees,
+- CUDA training and Optuna hyperparameter optimization,
+- dense evaluation on original LAS/LAZ test clouds,
+- LAS/LAZ file processing and segmentation of preloaded NumPy arrays,
+- JSON-based model and training configuration,
+- GPU KNN caching inside the model,
+- neighborhood feature aggregation, max-pooling downsampling, and weighted
+  decoder interpolation.
+
+The architecture is based on the RandLA-Net scheme from the original paper
+[[1]](#cite1):
+
 ![IMG](https://github.com/kalmary/RandLANet_Segmentation/blob/readme-preparation/img/RandLANet_scheme.png)
-
-
-Key modifications we added:
-- memory efficient, gpu - based knn search,
-- model configurability from .json file,
-- high scalability of model, training and processing pipelines,
-- better decoder upsampling.
 
 ---
 # 2. Repository structure: <a name="fstructure"></a>
@@ -58,7 +61,7 @@ Key modifications we added:
 ```
 ---
 
-# 3. Instalation: <a name="installation"></a>
+# 3. Installation: <a name="installation"></a>
 
 The `nn_utils` submodule uses SSH, so configure a GitHub SSH key before cloning.
 
@@ -88,10 +91,12 @@ git submodule update --init --recursive
 # 4. Usage <a name="usage"></a>
 ## 1. Preprocessing <a name="preprocessing"></a>
 
-Training and evaluation consume paired files in each dataset split:
+Training consumes paired files in each dataset split:
 
 - `*.npy`: arrays with shape `(N, 5)` containing `x, y, z, intensity, label`,
 - `*.pkl`: a `scipy.spatial.cKDTree` with the same stem and point count.
+
+Dense evaluation consumes the original LAS/LAZ test files.
 
 Configure the source, output, voxel-size, and tile-size constants in the
 `if __name__ == "__main__"` block of `src/data_processing/downsample_LAZ.py`,
@@ -105,12 +110,17 @@ The resulting `train/`, `val/`, and `test/` directories are referenced by the
 JSON files in `src/model_pipeline/training_configs/`.
 
 ## 2. Training <a name="training"></a>
-Examine contents of:
-- ``src/model_pipeline/model_configs`` - .json files with model architectures,
-- ``src/model_pipeline/training_configs`` - .json files with training configs.
-Pay attention to above files and adjust them to ensure the fit with your available resources.
 
-Files with `_single` suffix are meant for single training without any optimizations. Others are for multi-hyperparameter optimization.
+Training configuration is stored in:
+
+- `src/model_pipeline/model_configs/` — JSON model architectures,
+- `src/model_pipeline/training_configs/` — JSON training and optimization
+  settings.
+
+Files with the `_single` suffix configure a single training case. The remaining
+training configuration is used for Optuna optimization. Batch size, point count,
+model dimensions, and worker counts should match the available CPU, RAM, and GPU
+resources.
 
 Training is CUDA-only. Run the command from the repository root:
 
@@ -141,11 +151,11 @@ a fresh model, optimizer, scheduler, loss instances, and metric histories. The
 outer checkpoint logic selects the best epoch across all repetitions using
 ordinary validation accuracy and validation loss.
 
-Mode `2` currently runs 80 Optuna trials. Change `n_trials` in `main()` if a
-different optimization budget is required. The best model, its config, and
-metric-history plots are saved during training.
+Mode `2` runs 80 Optuna trials. The trial count is configured by `n_trials` in
+`main()`. Training saves the best model, its configuration, and metric-history
+plots.
 
-Use `--help` to display the current CLI options.
+Use `--help` to display the CLI options.
 
 ## 3. Evaluation <a name="evaluation"></a>
 
@@ -158,8 +168,11 @@ python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --input_
 
 `MODEL_NAME` is the trained filename without `.pt`, for example
 `RandLANetTest_123`. `--input_path` can point to one LAS/LAZ file or a directory.
-If it is omitted, evaluation uses `data_path_test_raw` from the saved model
-config when available, otherwise it falls back to `data_path_test`.
+The evaluation input path is resolved in this order:
+
+1. `--input_path`,
+2. `data_path_test_raw` from the saved model configuration,
+3. `data_path_test` from the saved model configuration.
 
 The inference pipeline applies the same voxel subsampling, intensity
 normalization, tiling, voting, and dense nearest-neighbor upsampling as
@@ -176,7 +189,8 @@ and configs to `src/final_files/` for inference.
 
 # 5. Final data processing <a name="pipelines"></a>
 
-To perform .LAZ files semantic segmentation, based on pretrained model run:
+Process LAS/LAZ files with a trained model:
+
 ```bash
 python src/main.py --model_name MODEL_NAME --device cuda --input_path path/to/raw/data --output_path path/with/processed/files --verbose
 ```
@@ -210,6 +224,7 @@ segmenter = SegmentClass(
     voxel_size=0.10,
     tile_size=40.0,
     overlap=5.0,
+    num_votes=3,
     pbar_bool=True,
 )
 
@@ -217,6 +232,11 @@ points = np.random.random((1_000_000, 3)).astype(np.float32)
 intensity = np.random.randint(0, 65536, len(points), dtype=np.uint16)
 labels = segmenter.segment_pcd(points, intensity)
 ```
+
+`num_votes` is the minimum spatial possibility reached by every subsampled
+point inside a tile. Higher values perform more prediction passes and increase
+inference time. Softmax predictions from all passes are averaged before the
+final class is selected.
 
 # 6. Testing <a name="testing"></a>
 
@@ -253,24 +273,4 @@ To cite the original paper about RandLANet use:
 ### **License**
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
