@@ -188,3 +188,4 @@ def test_make_loader_uses_one_nonpersistent_producer(tmp_path, save_tile):
     context = loader.multiprocessing_context
     assert context is not None
     assert context.get_start_method() == "spawn"
+    
