@@ -53,6 +53,16 @@ def test_segmenter_loads_config_and_checkpoint_from_separate_directories(
         'model_dir': model_dir,
     }
     assert instance.config['num_classes'] == 3
+    assert instance.num_votes == 3
+
+
+@pytest.mark.parametrize('num_votes', [0, -1, 1.5, True])
+def test_segmenter_requires_positive_integer_num_votes(num_votes):
+    with pytest.raises(ValueError, match='positive integer'):
+        array_processing.SegmentClass(
+            model_name='model_1',
+            num_votes=num_votes,
+        )
 
 
 @pytest.fixture
@@ -64,7 +74,7 @@ def segmenter():
     instance.num_points = 3
     instance.batch_size = 2
     instance.n_classes = 2
-    instance.n_seen = 2
+    instance.num_votes = 2
     instance.query_workers = 1
     instance.pbar_bool = False
     instance.voxel_size = 0.1
@@ -160,7 +170,7 @@ def test_part_sampling_starts_with_lowest_possibility_centers(
         selected_centers.append(center_indices.copy())
         return original_query(tree, xyz, center_indices)
 
-    segmenter.n_seen = 1
+    segmenter.num_votes = 1
     segmenter._rng = FixedRng()
     monkeypatch.setattr(segmenter, '_query_neighbors', record_query)
 

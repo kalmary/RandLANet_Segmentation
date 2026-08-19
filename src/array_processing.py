@@ -27,7 +27,7 @@ class SegmentClass:
         voxel_size: float = 0.10,
         tile_size: float = 40.0,
         overlap: float = 5.0,
-        n_seen: int = 10,
+        num_votes: int = 3,
         query_workers: int = -1,
         pbar_bool: bool = False,
     ):
@@ -39,8 +39,12 @@ class SegmentClass:
             raise ValueError("tile_size must be positive")
         if overlap < 0:
             raise ValueError("overlap cannot be negative")
-        if not 1 <= n_seen <= np.iinfo(np.int8).max:
-            raise ValueError("n_seen must fit in int8")
+        if (
+            isinstance(num_votes, (bool, np.bool_))
+            or not isinstance(num_votes, (int, np.integer))
+            or num_votes < 1
+        ):
+            raise ValueError("num_votes must be a positive integer")
         if query_workers == 0 or query_workers < -1:
             raise ValueError("query_workers must be -1 or a positive integer")
 
@@ -49,7 +53,7 @@ class SegmentClass:
         self.voxel_size = float(voxel_size)
         self.tile_size = float(tile_size)
         self.overlap = float(overlap)
-        self.n_seen = int(n_seen)
+        self.num_votes = int(num_votes)
         self.query_workers = int(query_workers)
         self.pbar_bool = pbar_bool
         self._rng = np.random.default_rng()
@@ -207,7 +211,7 @@ class SegmentClass:
             dtype=np.float32,
         )
 
-        while possibilities.min() < self.n_seen:
+        while possibilities.min() < self.num_votes:
             center_count = min(self.batch_size, len(points))
             center_indices = np.argsort(
                 possibilities,

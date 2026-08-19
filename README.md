@@ -164,8 +164,9 @@ config when available, otherwise it falls back to `data_path_test`.
 The inference pipeline applies the same voxel subsampling, intensity
 normalization, tiling, voting, and dense nearest-neighbor upsampling as
 `SegmentClass`. Inside every tile, crop centers follow a RandLA-Net spatial
-possibility map until every point reaches the configured `n_seen` possibility
-threshold; repeated softmax predictions are then averaged per point. Metrics
+possibility map until every point reaches the configured `num_votes`
+possibility threshold (default: `3`); repeated softmax predictions are then
+averaged per point. Metrics
 include every classified source point (`classification != 0`) exactly once;
 LAS classes are converted from `1..N` to model labels
 `0..N-1`. Unclassified points are segmented for spatial context but excluded
