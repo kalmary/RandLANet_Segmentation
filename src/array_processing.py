@@ -171,33 +171,58 @@ class SegmentClass:
             np.iinfo(np.int8).max,
         ).astype(np.int8)
 
+    @staticmethod
+    def _update_possibilities(
+        possibilities: np.ndarray,
+        points: np.ndarray,
+        center_indices: np.ndarray,
+        neighbor_indices: np.ndarray,
+    ) -> None:
+        neighborhoods = points[neighbor_indices]
+        centers = points[center_indices, None, :]
+        squared_distances = np.sum(
+            (neighborhoods - centers) ** 2,
+            axis=2,
+        )
+        max_distances = squared_distances.max(axis=1, keepdims=True)
+        normalized = np.divide(
+            squared_distances,
+            max_distances,
+            out=np.zeros_like(squared_distances),
+            where=max_distances > 0,
+        )
+        deltas = (1.0 - normalized) ** 2
+        np.add.at(possibilities, neighbor_indices, deltas)
+
     def _segment_part(
         self,
         points: np.ndarray,
         intensity: np.ndarray,
     ) -> np.ndarray:
         tree = cKDTree(points, leafsize=40)
+        possibilities = self._rng.random(len(points)) * 1e-3
         seen = np.zeros((len(points), 1), dtype=np.int8)
         probabilities = np.zeros(
             (len(points), self.n_classes),
             dtype=np.float32,
         )
 
-        while True:
-            remaining = np.flatnonzero(seen[:, 0] < self.n_seen)
-            if remaining.size == 0:
-                break
-
-            center_count = min(self.batch_size, remaining.size)
-            center_indices = self._rng.choice(
-                remaining,
-                size=center_count,
-                replace=False,
-            )
+        while possibilities.min() < self.n_seen:
+            center_count = min(self.batch_size, len(points))
+            center_indices = np.argsort(
+                possibilities,
+                kind="stable",
+            )[:center_count]
             neighbors, model_neighbors = self._query_neighbors(
                 tree,
                 points,
                 center_indices,
+            )
+            self._update_possibilities(
+                possibilities,
+                points,
+                center_indices,
+                neighbors,
             )
 
             centers = points[center_indices, None, :]
@@ -223,6 +248,8 @@ class SegmentClass:
                 batch_probabilities[:, :neighbors.shape[1]],
             )
 
+        if np.any(seen == 0):
+            raise RuntimeError("possibility sampling left points without predictions")
         probabilities /= seen.astype(np.float32)
         return np.argmax(probabilities, axis=1).astype(np.int8)
 

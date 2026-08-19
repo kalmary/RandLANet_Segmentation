@@ -118,6 +118,57 @@ def test_prediction_accumulation_counts_every_occurrence():
     )
 
 
+def test_possibility_updates_use_randlanet_distance_deltas():
+    possibilities = np.zeros(3, dtype=np.float64)
+    points = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+        dtype=np.float32,
+    )
+
+    array_processing.SegmentClass._update_possibilities(
+        possibilities,
+        points,
+        center_indices=np.array([0]),
+        neighbor_indices=np.array([[0, 1, 2]]),
+    )
+
+    np.testing.assert_allclose(possibilities, [1.0, 0.5625, 0.0])
+
+
+def test_part_sampling_starts_with_lowest_possibility_centers(
+    segmenter,
+    monkeypatch,
+):
+    points = np.column_stack(
+        (
+            np.arange(5, dtype=np.float32),
+            np.zeros((5, 2), dtype=np.float32),
+        )
+    )
+    intensity = np.array([0.0, 1.0, 0.0, 1.0, 0.0], dtype=np.float32)
+    first_possibilities = np.array([0.9, 0.1, 0.8, 0.2, 0.7])
+    selected_centers = []
+    original_query = segmenter._query_neighbors
+
+    class FixedRng:
+        @staticmethod
+        def random(size):
+            assert size == len(first_possibilities)
+            return first_possibilities
+
+    def record_query(tree, xyz, center_indices):
+        selected_centers.append(center_indices.copy())
+        return original_query(tree, xyz, center_indices)
+
+    segmenter.n_seen = 1
+    segmenter._rng = FixedRng()
+    monkeypatch.setattr(segmenter, '_query_neighbors', record_query)
+
+    segmenter._segment_part(points, intensity)
+
+    np.testing.assert_array_equal(selected_centers[0], [1, 3])
+
+
 def test_part_sampling_classifies_every_point(segmenter):
     points = np.array(
         [

@@ -163,8 +163,11 @@ config when available, otherwise it falls back to `data_path_test`.
 
 The inference pipeline applies the same voxel subsampling, intensity
 normalization, tiling, voting, and dense nearest-neighbor upsampling as
-`SegmentClass`. Metrics include every classified source point (`classification
-!= 0`) exactly once; LAS classes are converted from `1..N` to model labels
+`SegmentClass`. Inside every tile, crop centers follow a RandLA-Net spatial
+possibility map until every point reaches the configured `n_seen` possibility
+threshold; repeated softmax predictions are then averaged per point. Metrics
+include every classified source point (`classification != 0`) exactly once;
+LAS classes are converted from `1..N` to model labels
 `0..N-1`. Unclassified points are segmented for spatial context but excluded
 from metrics. Evaluation reports ordinary accuracy and mIoU and creates a
 confusion matrix and text classification report. Copy selected trained models
