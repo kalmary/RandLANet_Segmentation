@@ -11,26 +11,24 @@ class KNNCache:
 
     
     def build(self, pcd): # batched knn for whole point cloud, gpu and cdist
-        """Memory-efficient KNN using chunked processing"""
+        """Build the full distance cache while allocating one chunk at a time."""
         self.pcd = pcd.contiguous()
-        _, N_tgt, _ = self.pcd.size()
+        batch_size, num_points, _ = self.pcd.size()
+        chunk_size = min(1024, num_points)
+        self.distances = torch.empty(
+            (batch_size, num_points, num_points),
+            device=self.pcd.device,
+            dtype=self.pcd.dtype,
+        )
 
-        # Process in chunks to avoid large distance matrices
-        chunk_size = min(1024, N_tgt)  # Adjust based on available memory
-        all_dist = []
-
-        for i in range(0, N_tgt, chunk_size):
-            end_idx = min(i + chunk_size, N_tgt)
-            tgt_chunk = self.pcd[:, i:end_idx]
-
-            # Only compute distances for this chunk
-            distances = torch.cdist(tgt_chunk, self.pcd)
-            # dist, idx = torch.topk(distances, k=k, dim=-1, largest=False)
-
-            # all_idx.append(idx)
-            all_dist.append(distances)
-
-        self.distances = torch.cat(all_dist, dim=1)
+        for start in range(0, num_points, chunk_size):
+            end = min(start + chunk_size, num_points)
+            chunk_distances = torch.cdist(
+                self.pcd[:, start:end],
+                self.pcd,
+            )
+            self.distances[:, start:end].copy_(chunk_distances)
+            del chunk_distances
     
     def query(self, src_idx: torch.Tensor, tgt_idx: torch.Tensor, num_neighbors) -> Tuple[torch.Tensor, torch.Tensor]:
         
