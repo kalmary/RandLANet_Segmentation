@@ -214,7 +214,7 @@ class SegmentClass:
                                                             overlap_ratio=0.4,
                                                             verbose=self.verbose,
                                                             desc="Segmenting small voxels",
-                                                            position=2)
+                                                            position=3)
 
         for (voxel_idx, noise) in generator:
 
@@ -288,7 +288,7 @@ class SegmentClass:
                                                                shuffle=False,
                                                                verbose=self.verbose,
                                                                desc="Big voxel segmentation",
-                                                               position=1):
+                                                               position=2):
             if indices.shape[0] == 0:
                 continue
 

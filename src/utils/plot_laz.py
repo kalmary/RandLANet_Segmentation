@@ -4,9 +4,7 @@ import numpy as np
 import pathlib as pth
 
 
-def _tree_species(laz):
-    if "tree_species" in laz.point_format.extra_dimension_names:
-        return laz.tree_species
+def _species(laz):
     return laz.species
 
 
@@ -22,7 +20,7 @@ def single_file():
     print("Plotting tree ids")
     plot_cloud(points, feature)
 
-    feature = _tree_species(laz)
+    feature = _species(laz)
     print("Plotting species")
     plot_cloud(points, feature)
 
@@ -48,7 +46,7 @@ def mutliple_files():
         print(f"Plotting {file.stem}, tree ids")
         plot_cloud(points, feature)
 
-        feature = _tree_species(laz)
+        feature = _species(laz)
         print(f"Plotting {file.stem}, species")
         plot_cloud(points, feature)
 
