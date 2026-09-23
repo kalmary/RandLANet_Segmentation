@@ -52,8 +52,8 @@ Key modifications we added:
 │   └── utils
 │       ├── nn_utils             #External/shared neural-network utilities
 │       └── pcd_manipulation.py  #Point cloud manipulation utilities
-├── requirements.txt
-├── requirements_pytorch.txt
+├── pyproject.toml
+├── uv.lock
 └── README.md
 ```
 ---
@@ -70,33 +70,39 @@ cd RandLANet_Segmentation
 git pull
 git submodule update --init --recursive
 
-git submodule foreach --recursive git checkout main
-git submodule foreach --recursive git pull origin main
+git submodule foreach --recursive git checkout development
 ```
 
-Create and activate a Virtual Environment and install requirements:
+Create the uv environment with Python 3.12 and choose one PyTorch profile:
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-
-# Install all requirements, without pytorch and cuda
-pip install requirements.txt
-
-# Tested on this, but should work with any other version
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+uv sync --extra pytorch-cpu  # core runtime, CPU-only
+uv sync --group test --extra pytorch-cpu  # CPU-only on macOS, Windows, or Linux
+# macOS system profile (also CPU): uv sync --group test --extra pytorch-macos
+# Linux with CUDA 13.2: uv sync --group test --extra pytorch-linux-cuda
+# Windows with CUDA 13.2: uv sync --group test --extra pytorch-windows-cuda
 
 # update git submodules
 git submodule update --init --recursive
 ```
 
+The default `basic` group includes LAS/LAZ runtime support. The `test` group adds plotting and development tools. After syncing, `uv run --no-sync` preserves the selected groups and PyTorch profile.
+
 ---
 
 # 4. Usage <a name="usage"></a>
+
+The main entry point supports both forms:
+
+```bash
+uv run --no-sync python src/main.py --help
+uv run --no-sync python -m src.main --help
+```
+
 ## 1. Preprocessing <a name="preprocessing"></a>
 
 Before training a model, data preprocessing must be done. To do so run:
 ```bash
-python src/data_processing/downsample_LAZ.py --source_path path/to/raw/data --decimated_path path/to/decimated/pcds --converted_path path/to/final/processed/files
+uv run --no-sync python src/data_processing/downsample_LAZ.py --source_path path/to/raw/data --decimated_path path/to/decimated/pcds --converted_path path/to/final/processed/files
 ```
 Paths used when processing:
 - source_path: directory with raw (.LAZ by default) point clouds,
@@ -116,7 +122,7 @@ Files with `_single` suffix are meant for single training without any optimizati
 To start training run:
 ```bash
 cd src/model_pipeline
-python TrainSegmAutomated.py --model_name MODEL_NAME --device cuda --mode 2
+uv run --no-sync python src/model_pipeline/TrainSegmAutomated.py --model_name MODEL_NAME --device cpu --mode 2
 ```
 Available flags:
 - ``model_name`` - name of your model. Results are stored in ``src/model_pipeline/training_results/MODEL_NAME``,
@@ -146,7 +152,7 @@ To evaluate trained model, run EvalSegm_RandLANet.py with proper flags:
 
 ```bash
 cd src/model_pipeline
-python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --device cuda --mode 1
+uv run --no-sync python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --device cpu --mode 1
 ```
 ``model_name`` flag must be the exact name of model you got from training, but without extension name. For example:
 ```
@@ -171,7 +177,7 @@ Once models are trained, the best models and configs are choosen, copy the files
 
 To perform .LAZ files semantic segmentation, based on pretrained model run:
 ```bash
-src/python main.py --model_name MODEL_NAME --device cuda --input_path path/to/raw/data --output_path path/with/processed/files --mode 1 --verbose True
+uv run --no-sync python src/main.py --model_name MODEL_NAME --device cpu --input_path path/to/raw/data --output_path path/with/processed/files --mode 1 --verbose True
 ```
 Available flags:
 - ``model_name`` - model name without its extension (.pt files supported),
