@@ -8,8 +8,12 @@ from tqdm import tqdm
 import laspy
 import numpy as np
 
-from array_processing import SegmentClass
 import torch
+
+if __package__:
+    from .array_processing import SegmentClass
+else:
+    from array_processing import SegmentClass
 
 def iter_files(args_dict):
     """Iterates over files in a directory and processes them using the SegmentClass instance."""
