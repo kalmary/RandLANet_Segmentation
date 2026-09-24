@@ -13,16 +13,12 @@ from sklearn.neighbors import KDTree
 import torch
 import torch.nn as nn
 
-try:
+if __package__:
     from .final_files.RandLANet_CB import RandLANet
     from .utils import load_json, load_model, pcd_manipulation
-except ImportError:
-    try:
-        from final_files.RandLANet_CB import RandLANet
-        from utils import load_json, load_model, pcd_manipulation
-    except ImportError:
-        from PCDSegmentation.src.final_files.RandLANet_CB import RandLANet
-        from PCDSegmentation.src.utils import load_json, load_model, pcd_manipulation
+else:
+    from final_files.RandLANet_CB import RandLANet
+    from utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
     def __init__(self,
