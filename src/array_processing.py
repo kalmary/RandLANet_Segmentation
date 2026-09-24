@@ -329,7 +329,7 @@ class SegmentClass:
         return labels
 
         
-def test_segm():
+def run_segmentation_example():
     path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
 
     import laspy
@@ -356,7 +356,70 @@ def test_segm():
     plot_cloud(points, labels)
 
 
+def test_segment_pcd_empty_input_returns_empty_int32():
+    segmenter = SegmentClass.__new__(SegmentClass)
+
+    result = segmenter.segment_pcd(np.empty((0, 3)), np.empty(0))
+
+    assert result.shape == (0,)
+    assert result.dtype == np.int32
+
+
+def test_segment_pcd_rejects_point_intensity_length_mismatch():
+    import pytest
+
+    segmenter = SegmentClass.__new__(SegmentClass)
+
+    with pytest.raises(ValueError, match="points and intensity length mismatch"):
+        segmenter.segment_pcd(np.zeros((2, 3)), np.zeros(1))
+
+
+def test_segment_pcd_centers_points_and_preserves_label_order(monkeypatch):
+    segmenter = SegmentClass.__new__(SegmentClass)
+    segmenter.scaled = False
+    points = np.array([[10.0, 0.0, 1.0], [11.0, 1.0, 2.0], [12.0, 2.0, 3.0]])
+    original = points.copy()
+    intensity = np.array([3, 2, 1])
+    observed = {}
+
+    def segment_small(centered_points, values):
+        observed["points"] = centered_points
+        observed["intensity"] = values
+        return np.array([2, 1, 0], dtype=np.int32)
+
+    monkeypatch.setattr(segmenter, "_segment_small_voxel", segment_small)
+
+    result = segmenter.segment_pcd(points, intensity, fragment_pcd_threshold=4)
+
+    np.testing.assert_array_equal(result, np.array([2, 1, 0], dtype=np.int32))
+    np.testing.assert_array_equal(points, original)
+    np.testing.assert_allclose(observed["points"].mean(axis=0), np.zeros(3))
+    assert observed["points"].dtype == np.float32
+    np.testing.assert_array_equal(observed["intensity"], intensity)
+
+
+def test_segment_pcd_uses_big_voxels_at_fragmentation_threshold(monkeypatch):
+    segmenter = SegmentClass.__new__(SegmentClass)
+    segmenter.scaled = False
+    observed = []
+
+    def segment_big(points, intensity):
+        observed.append(points.shape[0])
+        return np.array([1, 0], dtype=np.int32)
+
+    monkeypatch.setattr(segmenter, "_segment_big_voxel", segment_big)
+
+    result = segmenter.segment_pcd(
+        np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]),
+        np.array([1, 2]),
+        fragment_pcd_threshold=2,
+    )
+
+    np.testing.assert_array_equal(result, np.array([1, 0], dtype=np.int32))
+    assert observed == [2]
+
+
 
 
 if __name__ == '__main__':
-    test_segm()
+    run_segmentation_example()
