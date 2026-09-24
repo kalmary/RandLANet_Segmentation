@@ -3,6 +3,7 @@ import pathlib as pth
 import argparse
 import logging
 import shutil
+import sys
 from tqdm import tqdm
 
 import laspy
@@ -206,8 +207,8 @@ def test_main_dispatches_processing_arguments(monkeypatch):
     )
     received = []
 
-    monkeypatch.setattr(__import__(__name__), "argparser", lambda: parsed_args)
-    monkeypatch.setattr(__import__(__name__), "iter_files", received.append)
+    monkeypatch.setattr(sys.modules[__name__], "argparser", lambda: parsed_args)
+    monkeypatch.setattr(sys.modules[__name__], "iter_files", received.append)
 
     main()
 
@@ -264,7 +265,7 @@ def test_iter_files_processes_each_input_once(tmp_path, monkeypatch):
             assert intensity.tolist() == [7, 8]
             return np.array([2, 4], dtype=np.uint8)
 
-    monkeypatch.setattr(__import__(__name__), "SegmentClass", FakeSegmenter)
+    monkeypatch.setattr(sys.modules[__name__], "SegmentClass", FakeSegmenter)
     monkeypatch.setattr(laspy, "read", lambda path: FakeLas())
 
     iter_files(
