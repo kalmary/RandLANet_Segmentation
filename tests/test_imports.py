@@ -32,3 +32,19 @@ importlib.import_module("MODULE")
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_segment_class_imports_from_parent_project_root():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from src.PCDSegmentation.src.array_processing import SegmentClass; "
+            "assert SegmentClass.__name__ == 'SegmentClass'",
+        ],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
