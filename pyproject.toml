@@ -83,3 +83,4 @@ explicit = true
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "main.py", "array_processing.py"]
+testpaths = ["src/main.py", "src/array_processing.py", "tests"]
