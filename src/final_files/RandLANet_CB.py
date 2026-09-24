@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torchinfo import summary
 
 import pathlib as pth
 import sys
@@ -275,6 +274,5 @@ def test_model():
 
 if __name__ == '__main__':
     test_model()
-
 
 
