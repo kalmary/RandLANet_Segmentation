@@ -10,18 +10,10 @@ from torch.utils.data import IterableDataset, get_worker_info
 import fpsample
 import random
 
-import sys
-import os
-
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
-
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
+if __package__:
+    from ..utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
+else:
+    from utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
 
 class Dataset(IterableDataset):
 

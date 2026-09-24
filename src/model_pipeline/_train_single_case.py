@@ -1,23 +1,25 @@
 import torch
-from torchinfo import summary
 import torch.optim as optim
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
-from utils import EarlyStopping
 
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
-from RandLANet_CB import RandLANet
-
-from _data_loader import *
-
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from utils import compute_mIoU, calculate_accuracy
-from utils import compute_pos_weights_h5, get_dataset_len, FocalLoss
-from utils import wrap_hist
+if __package__:
+    from .RandLANet_CB import RandLANet
+    from ._data_loader import Dataset
+    from ..utils import (
+        EarlyStopping, compute_mIoU, calculate_accuracy,
+        compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
+    )
+else:
+    from RandLANet_CB import RandLANet
+    from _data_loader import Dataset
+    from utils import (
+        EarlyStopping, compute_mIoU, calculate_accuracy,
+        compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
+    )
 
 from tqdm import tqdm
 from typing import Union, Generator, Any

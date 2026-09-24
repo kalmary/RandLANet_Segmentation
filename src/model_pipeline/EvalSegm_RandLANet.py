@@ -10,18 +10,26 @@ import pathlib as pth
 
 
 
-from RandLANet_CB import RandLANet
-from _data_loader import *
-
-import os
 import sys
 
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from utils import load_json, load_model, convert_str_values
-from utils import get_dataset_len, compute_pos_weights_h5, compute_mIoU, FocalLoss, get_intLabels, get_Probabilities
-from utils import Plotter, ClassificationReport
+if __package__:
+    from .RandLANet_CB import RandLANet
+    from ._data_loader import Dataset
+    from ..utils import (
+        load_json, load_model, convert_str_values, get_dataset_len,
+        compute_pos_weights_h5, compute_mIoU, FocalLoss, get_intLabels,
+        get_Probabilities, Plotter, ClassificationReport,
+    )
+else:
+    src_dir = pth.Path(__file__).parent.parent
+    sys.path.append(str(src_dir))
+    from RandLANet_CB import RandLANet
+    from _data_loader import Dataset
+    from utils import (
+        load_json, load_model, convert_str_values, get_dataset_len,
+        compute_pos_weights_h5, compute_mIoU, FocalLoss, get_intLabels,
+        get_Probabilities, Plotter, ClassificationReport,
+    )
 
 
 def _eval_model(config_dict: dict,
@@ -233,7 +241,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
 
 

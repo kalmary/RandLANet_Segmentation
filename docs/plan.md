@@ -27,7 +27,7 @@
 - [ ] Test empty and malformed point/intensity arrays, missing artifacts, provider errors, and deterministic small inference doubles.
 - [ ] Pin CLI flags/defaults and file discovery/output behavior in `src/main.py` and preprocessing scripts.
 - [ ] Test imports from the submodule root and the parent BRIK root.
-- [ ] Test direct and module forms for preprocessing, inference, training, and evaluation help/test modes.
+- [x] Test direct and module forms for preprocessing, inference, training, and evaluation help modes.
 
 ## Task 3: Normalize package imports
 

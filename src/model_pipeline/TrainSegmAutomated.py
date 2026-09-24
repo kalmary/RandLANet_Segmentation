@@ -22,14 +22,16 @@ import optuna
 from tqdm import tqdm
 
 
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from _train_single_case import train_model
-from utils import load_json, save2json, save_model, convert_str_values
-from utils import Plotter
-
-from RandLANet_CB import RandLANet
+if __package__:
+    from ._train_single_case import train_model
+    from ..utils import load_json, save2json, save_model, convert_str_values, Plotter
+    from .RandLANet_CB import RandLANet
+else:
+    src_dir = pth.Path(__file__).parent.parent
+    sys.path.append(str(src_dir))
+    from _train_single_case import train_model
+    from utils import load_json, save2json, save_model, convert_str_values, Plotter
+    from RandLANet_CB import RandLANet
 
 
 def check_models(model_configs_paths: list[pth.Path],
@@ -647,4 +649,4 @@ def main():
 
 if __name__ == '__main__':
     
-    main()  
+    main()
