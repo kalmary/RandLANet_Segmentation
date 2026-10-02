@@ -79,7 +79,7 @@ git commit -m "feat: load segmentation artifacts from separate directories"
 
 - [ ] **Step 1: Write failing sampling tests**
 
-Add tests asserting that sampling returns every index below the cap; returns exactly the cap above it; preserves singleton classes when `max_points >= number_of_classes`; follows proportional largest-remainder allocation; contains no duplicates; and returns the same result for two generators seeded with `0`. Add validation tests for non-positive caps.
+Add tests asserting that sampling returns every index below the cap; returns exactly the cap above it; balances quotas across classes; redistributes unused quota from rare classes; contains no duplicates; and returns the same result for two generators seeded with `0`. Add validation tests for non-positive caps.
 
 - [ ] **Step 2: Run the sampling tests to verify they fail**
 
@@ -89,7 +89,7 @@ Expected: FAIL because `_stratified_indices` does not exist.
 
 - [ ] **Step 3: Implement `_stratified_indices`**
 
-Use `np.unique(..., return_counts=True)`, reserve one slot per class when possible, distribute remaining capacity proportionally with largest-remainder rounding while respecting each class population, sample each class without replacement using the supplied generator, combine the selected source indices, and sort them to preserve source order.
+Use `np.unique(..., return_counts=True)`, divide the budget evenly across classes, iteratively redistribute unused quota from exhausted classes among classes with remaining capacity, sample each class without replacement using the supplied generator, combine the selected source indices, and sort them to preserve source order.
 
 - [ ] **Step 4: Write failing metric tests**
 

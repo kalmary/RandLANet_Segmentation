@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import laspy
 from torch.utils.data import DataLoader
 from torchinfo import summary
 
@@ -41,6 +42,32 @@ class EvaluationMetrics(TypedDict):
     targets: np.ndarray
 
 
+class CollectionSummary(TypedDict):
+    sample_paths: list[pth.Path]
+    processed_files: int
+    labeled_files: int
+    sampled_points: int
+
+
+def _cloud_files(raw_path: pth.Path) -> list[pth.Path]:
+    raw_path = pth.Path(raw_path)
+    if raw_path.exists() and not raw_path.is_dir():
+        raise NotADirectoryError(f'raw_path is not a directory: {raw_path}')
+    files = sorted(
+        path for path in raw_path.rglob('*')
+        if path.is_file() and path.suffix.lower() in {'.las', '.laz'}
+    ) if raw_path.is_dir() else []
+    if not files:
+        raise FileNotFoundError(f'No LAS or LAZ files in {raw_path}')
+    return files
+
+
+def _device(name: str) -> torch.device:
+    if name == 'cuda' and not torch.cuda.is_available():
+        raise RuntimeError('CUDA was requested but is not available')
+    return torch.device(name)
+
+
 def _stratified_indices(
     targets: np.ndarray,
     max_points: int,
@@ -54,22 +81,15 @@ def _stratified_indices(
 
     classes, counts = np.unique(targets, return_counts=True)
     quotas = np.zeros(len(classes), dtype=np.int64)
-    if max_points >= len(classes):
-        quotas[:] = 1
-    remaining = max_points - int(quotas.sum())
-    capacities = counts - quotas
-    if remaining:
-        exact = capacities * (remaining / capacities.sum())
-        additions = np.minimum(np.floor(exact).astype(np.int64), capacities)
-        quotas += additions
+    remaining = max_points
+    while remaining:
+        active = np.flatnonzero(quotas < counts)
+        share, extra = divmod(remaining, len(active))
+        requested = np.full(len(active), share, dtype=np.int64)
+        requested[:extra] += 1
+        additions = np.minimum(requested, counts[active] - quotas[active])
+        quotas[active] += additions
         remaining -= int(additions.sum())
-        order = np.argsort(-(exact - np.floor(exact)), kind='stable')
-        for class_index in order:
-            if remaining == 0:
-                break
-            if quotas[class_index] < counts[class_index]:
-                quotas[class_index] += 1
-                remaining -= 1
 
     selected = [
         rng.choice(np.flatnonzero(targets == label), size=quota, replace=False)
@@ -105,6 +125,58 @@ def calculate_metrics(
         'class_iou': class_iou.cpu().numpy(),
         'predictions': predictions,
         'targets': targets,
+    }
+
+
+def collect_samples(
+    segmenter: Any,
+    files: list[pth.Path],
+    max_points: int,
+    temp_dir: pth.Path,
+    rng: np.random.Generator,
+    verbose: bool = True,
+) -> CollectionSummary:
+    sample_paths: list[pth.Path] = []
+    labeled_files = 0
+    sampled_points = 0
+    iterator = tqdm(files, desc='Evaluating files', unit='file') if verbose else files
+    for file_index, file_path in enumerate(iterator):
+        cloud = laspy.read(file_path)
+        points = np.column_stack((np.asarray(cloud.x), np.asarray(cloud.y), np.asarray(cloud.z)))
+        intensity = np.asarray(cloud.intensity)
+        stored_targets = np.asarray(cloud.classification, dtype=np.int64)
+        if len(intensity) != len(points) or len(stored_targets) != len(points):
+            raise ValueError(f'{file_path}: point attributes have mismatched lengths')
+
+        predictions = np.asarray(segmenter.segment_pcd(points, intensity))
+        if predictions.shape != (len(points),):
+            raise ValueError(
+                f'{file_path}: expected {len(points)} predictions, got {predictions.shape}'
+            )
+        if predictions.size and (
+            predictions.min() < 0 or predictions.max() >= segmenter.n_classes
+        ):
+            raise ValueError(f'{file_path}: predictions outside model class range')
+
+        labeled_indices = np.flatnonzero(stored_targets > 0)
+        if labeled_indices.size == 0:
+            continue
+        targets = stored_targets[labeled_indices] - 1
+        if targets.min() < 0 or targets.max() >= segmenter.n_classes:
+            raise ValueError(f'{file_path}: targets outside model class range')
+        chosen = _stratified_indices(targets, max_points, rng)
+        sample = np.column_stack((targets[chosen], predictions[labeled_indices][chosen]))
+        sample_path = pth.Path(temp_dir) / f'sample_{file_index:06d}.npy'
+        np.save(sample_path, sample.astype(np.int16, copy=False))
+        sample_paths.append(sample_path)
+        labeled_files += 1
+        sampled_points += len(sample)
+
+    return {
+        'sample_paths': sample_paths,
+        'processed_files': len(files),
+        'labeled_files': labeled_files,
+        'sampled_points': sampled_points,
     }
 def _eval_model(config_dict: dict,
                 model: nn.Module) -> tuple[list, list, np.ndarray, np.ndarray, np.ndarray]:
@@ -315,5 +387,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

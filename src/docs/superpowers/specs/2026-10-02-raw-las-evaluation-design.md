@@ -34,7 +34,7 @@ LAS/LAZ classification values are the persisted representation: stored values `1
 
 Sampling occurs only after full-cloud inference. The candidate population is the set of points with usable ground truth, paired by source index with their predicted class.
 
-If a file has no more than `max_points` candidates, all candidates are retained. Otherwise, an exact-size stratified sample is drawn without replacement. Per-class quotas use proportional allocation with largest-remainder rounding, capped by each class's population. When `max_points` is at least the number of classes present, one slot is reserved for every class before the remaining slots are allocated proportionally; with a smaller budget, the largest proportional remainders determine which classes receive a slot. A local `numpy.random.default_rng(0)` supplies the draws across the sorted file sequence, making repeated evaluations reproducible without changing NumPy's global random state. Sampling is stratified by ground truth, never by prediction.
+If a file has no more than `max_points` candidates, all candidates are retained. Otherwise, an exact-size stratified sample is drawn without replacement. The budget is divided as evenly as possible among ground-truth classes present in the file. A class with fewer points than its quota contributes all its points, and the unused quota is redistributed evenly among classes that still have unsampled points until the budget is filled. A local `numpy.random.default_rng(0)` supplies the draws across the sorted file sequence, making repeated evaluations reproducible without changing NumPy's global random state. Sampling is stratified by ground truth, never by prediction.
 
 ## Temporary storage and aggregation
 
