@@ -158,13 +158,20 @@ def collect_samples(segmenter: Any, files: list[pth.Path], max_points: int,
     labeled_files = sampled_points = 0
     iterator = tqdm(files, desc='Evaluating files', unit='file') if verbose else files
     for file_index, file_path in enumerate(iterator):
-        cloud = laspy.read(file_path)
-        points = np.column_stack((np.asarray(cloud.x), np.asarray(cloud.y), np.asarray(cloud.z)))
-        intensity = np.asarray(cloud.intensity)
-        stored_targets = np.asarray(cloud.classification, dtype=np.int64)
+        try:
+            cloud = laspy.read(file_path)
+            points = np.column_stack((
+                np.asarray(cloud.x), np.asarray(cloud.y), np.asarray(cloud.z)
+            ))
+            intensity = np.asarray(cloud.intensity)
+            stored_targets = np.asarray(cloud.classification, dtype=np.int64)
+            predictions = np.asarray(segmenter.segment_pcd(points, intensity))
+        except Exception as error:
+            raise RuntimeError(
+                f'Failed to evaluate {file_path}: {error}'
+            ) from error
         if len(intensity) != len(points) or len(stored_targets) != len(points):
             raise ValueError(f'{file_path}: point attributes have mismatched lengths')
-        predictions = np.asarray(segmenter.segment_pcd(points, intensity))
         if predictions.shape != (len(points),):
             raise ValueError(f'{file_path}: expected {len(points)} predictions, got {predictions.shape}')
         if predictions.size and (predictions.min() < 0 or predictions.max() >= segmenter.n_classes):

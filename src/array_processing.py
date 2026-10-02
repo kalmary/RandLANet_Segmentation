@@ -72,6 +72,13 @@ class SegmentClass:
         config_dict = load_json(config_path)
         self._config = config_dict
         self._model_config: dict = config_dict['model_config']
+        top_level_classes = int(config_dict['num_classes'])
+        nested_classes = self._model_config.get('num_classes')
+        if nested_classes is not None and int(nested_classes) != top_level_classes:
+            raise ValueError(
+                'num_classes differs between the top-level and model configuration'
+            )
+        self._model_config['num_classes'] = top_level_classes
         self.voxel_size_small: float = self._model_config['max_voxel_dim']
 
         return config_dict
@@ -466,6 +473,20 @@ def test_segment_class_accepts_separate_config_and_model_directories(
     calls.clear()
     SegmentClass(model_name="network_1", config_dir=config_dir)
     assert calls == [("config", config_dir), ("model", config_dir)]
+
+
+def test_load_config_normalizes_top_level_class_count(tmp_path, monkeypatch):
+    config = {
+        "num_classes": 4,
+        "model_config": {"max_voxel_dim": 20},
+    }
+    monkeypatch.setattr(sys.modules[__name__], "load_json", lambda path: config)
+    segmenter = SegmentClass.__new__(SegmentClass)
+    segmenter.model_name = "network_1.pt"
+
+    segmenter._load_config(tmp_path)
+
+    assert segmenter.model_config["num_classes"] == 4
 
 
 

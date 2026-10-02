@@ -7,7 +7,7 @@ from src.model_pipeline import EvalSegm_RandLANet as evaluation
 
 
 def test_stratified_indices_are_exact_reproducible_and_keep_rare_classes():
-    targets = np.array([0] * 8 + [1] * 3 + [2] * 2)
+    targets = np.array([0] * 8 + [1] * 3 + [2])
 
     first = evaluation._stratified_indices(
         targets, 6, np.random.default_rng(0)
@@ -19,7 +19,7 @@ def test_stratified_indices_are_exact_reproducible_and_keep_rare_classes():
     assert len(first) == 6
     assert len(np.unique(first)) == 6
     np.testing.assert_array_equal(first, second)
-    assert np.bincount(targets[first], minlength=3).tolist() == [2, 2, 2]
+    assert np.bincount(targets[first], minlength=3).tolist() == [3, 2, 1]
 
 
 def test_stratified_indices_return_all_points_below_cap_and_validate_cap():
@@ -232,3 +232,67 @@ def test_dry_run_does_not_read_or_segment_clouds(tmp_path, monkeypatch):
     )
 
     evaluation.run_dry_run(args)
+
+
+def test_collect_samples_qualifies_reader_errors_with_source_path(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "broken.laz"
+    path.touch()
+    monkeypatch.setattr(
+        evaluation.laspy, "read", lambda source: (_ for _ in ()).throw(ValueError("bad header"))
+    )
+
+    with pytest.raises(RuntimeError, match=r"broken\.laz.*bad header"):
+        evaluation.collect_samples(
+            SimpleNamespace(n_classes=2), [path], 10, tmp_path,
+            np.random.default_rng(0), False,
+        )
+
+
+def test_run_evaluation_cleans_samples_when_later_file_fails(
+    tmp_path, monkeypatch
+):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    files = [raw / "first.laz", raw / "broken.laz"]
+    for path in files:
+        path.touch()
+    good_cloud = SimpleNamespace(
+        x=np.array([0.0]), y=np.array([0.0]), z=np.array([0.0]),
+        intensity=np.array([1]), classification=np.array([1]),
+    )
+    reads = iter([good_cloud, ValueError("bad header")])
+
+    def read(path):
+        value = next(reads)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    temp_paths = []
+    real_collect = evaluation.collect_samples
+
+    def collect(*args, **kwargs):
+        temp_paths.append(args[3])
+        return real_collect(*args, **kwargs)
+
+    monkeypatch.setattr(evaluation, "_cloud_files", lambda path: files)
+    monkeypatch.setattr(
+        evaluation, "_validated_segmenter",
+        lambda args: SimpleNamespace(
+            n_classes=2,
+            segment_pcd=lambda points, intensity: np.zeros(len(points), dtype=np.int64),
+        ),
+    )
+    monkeypatch.setattr(evaluation, "collect_samples", collect)
+    monkeypatch.setattr(evaluation.laspy, "read", read)
+    args = SimpleNamespace(
+        model_name="Network_2", raw_path=raw, device="cpu", mode=1,
+        max_points=10,
+    )
+
+    with pytest.raises(RuntimeError, match="broken.laz"):
+        evaluation.run_evaluation(args)
+
+    assert temp_paths and not temp_paths[0].exists()
