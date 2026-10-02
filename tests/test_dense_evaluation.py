@@ -1,247 +1,332 @@
-import pathlib
-import sys
-import tempfile
-import unittest
-from argparse import Namespace
-from unittest.mock import patch
+from types import SimpleNamespace
+import pathlib as pth
 
-import laspy
 import numpy as np
-import torch
+import pytest
 
-
-project_root = pathlib.Path(__file__).resolve().parents[1]
-sys.path.append(str(project_root))
-
-from src import array_processing
 from src.model_pipeline import EvalSegm_Dense as evaluation
+from src import array_processing
 
 
-class FixedSegmenter:
-    n_classes = 2
+def test_stratified_indices_are_exact_reproducible_and_keep_rare_classes():
+    targets = np.array([0] * 8 + [1] * 3 + [2])
 
-    def segment_pcd(self, points, intensity):
-        return (np.asarray(intensity) > 0).astype(np.int8)
+    first = evaluation._stratified_indices(
+        targets, 6, np.random.default_rng(0)
+    )
+    second = evaluation._stratified_indices(
+        targets, 6, np.random.default_rng(0)
+    )
+
+    assert len(first) == 6
+    assert len(np.unique(first)) == 6
+    np.testing.assert_array_equal(first, second)
+    assert np.bincount(targets[first], minlength=3).tolist() == [3, 2, 1]
 
 
-class RecordingSegmenter(FixedSegmenter):
-    def __init__(self):
-        self.point_counts = []
+def test_stratified_indices_return_all_points_below_cap_and_validate_cap():
+    indices = evaluation._stratified_indices(
+        np.array([1, 0, 1]), 4, np.random.default_rng(0)
+    )
+    np.testing.assert_array_equal(indices, [0, 1, 2])
 
-    def segment_pcd(self, points, intensity):
-        self.point_counts.append(len(points))
-        return super().segment_pcd(points, intensity)
+    with pytest.raises(ValueError, match="positive"):
+        evaluation._stratified_indices(
+            np.array([0]), 0, np.random.default_rng(0)
+        )
 
 
-class PlotRecorder:
+def test_metrics_report_accuracy_and_ordered_class_iou():
+    metrics = evaluation.calculate_metrics(
+        predictions=np.array([0, 0, 0, 1]),
+        targets=np.array([0, 0, 1, 1]),
+        num_classes=2,
+    )
+
+    assert metrics["accuracy"] == pytest.approx(0.75)
+    assert metrics["miou"] == pytest.approx(7 / 12)
+    np.testing.assert_allclose(metrics["class_iou"], [2 / 3, 1 / 2])
+
+
+@pytest.mark.parametrize(
+    ("predictions", "targets", "message"),
+    [
+        ([0], [0, 1], "same shape"),
+        ([], [], "empty"),
+        ([-1], [0], "predictions"),
+        ([0], [2], "targets"),
+    ],
+)
+def test_metrics_reject_invalid_arrays(predictions, targets, message):
+    with pytest.raises(ValueError, match=message):
+        evaluation.calculate_metrics(predictions, targets, num_classes=2)
+
+
+def test_cloud_files_are_recursive_sorted_and_case_insensitive(tmp_path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    expected = [tmp_path / "a.LAS", nested / "b.laz"]
+    for path in [*expected, tmp_path / "ignored.npy"]:
+        path.touch()
+
+    assert evaluation._cloud_files(tmp_path) == expected
+    with pytest.raises(NotADirectoryError):
+        evaluation._cloud_files(expected[0])
+    with pytest.raises(FileNotFoundError, match="No LAS or LAZ"):
+        evaluation._cloud_files(tmp_path / "empty")
+
+
+def test_device_rejects_unavailable_cuda(monkeypatch):
+    assert evaluation._device("cpu").type == "cpu"
+    monkeypatch.setattr(evaluation.torch.cuda, "is_available", lambda: False)
+    with pytest.raises(RuntimeError, match="CUDA"):
+        evaluation._device("cuda")
+    monkeypatch.setattr(evaluation.torch.cuda, "is_available", lambda: True)
+    assert evaluation._device("cuda").type == "cuda"
+
+
+def test_collect_samples_segments_whole_cloud_then_saves_labeled_pairs(
+    tmp_path, monkeypatch
+):
+    cloud_path = tmp_path / "cloud.laz"
+    cloud_path.touch()
+    cloud = SimpleNamespace(
+        x=np.array([1.0, 2.0, 3.0]),
+        y=np.array([4.0, 5.0, 6.0]),
+        z=np.array([7.0, 8.0, 9.0]),
+        intensity=np.array([10, 11, 12]),
+        classification=np.array([0, 1, 2]),
+    )
     calls = []
 
-    def __init__(self, class_num, plots_dir):
-        self.class_num = class_num
-        self.plots_dir = plots_dir
+    class Segmenter:
+        n_classes = 2
 
-    def cnf_matrix(self, file_name, **kwargs):
-        self.calls.append((file_name, kwargs))
+        def segment_pcd(self, points, intensity):
+            calls.append((points.copy(), intensity.copy()))
+            return np.array([1, 0, 1])
+
+    monkeypatch.setattr(evaluation.laspy, "read", lambda path: cloud)
+    output = tmp_path / "samples"
+    output.mkdir()
+
+    summary = evaluation.collect_samples(
+        Segmenter(), [cloud_path], 50_000, output, np.random.default_rng(0), False
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0].shape == (3, 3)
+    np.testing.assert_array_equal(calls[0][1], [10, 11, 12])
+    sample = np.load(summary["sample_paths"][0])
+    np.testing.assert_array_equal(sample, [[0, 0], [1, 1]])
+    assert summary["sampled_points"] == 2
 
 
-def write_las(path, classifications, intensity):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    header = laspy.LasHeader(point_format=3, version='1.2')
-    cloud = laspy.LasData(header)
-    point_count = len(classifications)
-    cloud.x = np.arange(point_count)
-    cloud.y = np.arange(point_count) + 1
-    cloud.z = np.arange(point_count) + 2
-    cloud.intensity = np.asarray(intensity, dtype=np.uint16)
-    cloud.classification = np.asarray(classifications, dtype=np.uint8)
-    cloud.write(path)
+def test_collect_samples_infers_unlabeled_cloud_without_writing_sample(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "unlabeled.las"
+    path.touch()
+    cloud = SimpleNamespace(
+        x=np.array([0.0]), y=np.array([0.0]), z=np.array([0.0]),
+        intensity=np.array([1]), classification=np.array([0]),
+    )
+    calls = []
+    segmenter = SimpleNamespace(
+        n_classes=2,
+        segment_pcd=lambda points, intensity: calls.append(len(points)) or np.array([0]),
+    )
+    monkeypatch.setattr(evaluation.laspy, "read", lambda path: cloud)
+
+    summary = evaluation.collect_samples(
+        segmenter, [path], 10, tmp_path, np.random.default_rng(0), False
+    )
+
+    assert calls == [1]
+    assert summary["sample_paths"] == []
+    assert summary["labeled_files"] == 0
 
 
-class DenseEvaluationTests(unittest.TestCase):
-    def setUp(self):
-        PlotRecorder.calls = []
+def test_parser_exposes_raw_evaluation_contract(tmp_path):
+    args = evaluation.parser([
+        "--model_name", "Network_2", "--raw_path", str(tmp_path)
+    ])
+    assert args.device == "cpu"
+    assert args.mode == 0
+    assert args.max_points == 50_000
+    assert args.raw_path == tmp_path
 
-    def test_collects_one_prediction_per_classified_source_point(self):
-        with tempfile.TemporaryDirectory() as directory:
-            input_dir = pathlib.Path(directory)
-            write_las(
-                input_dir / 'first.las',
-                classifications=[1, 2, 0, 1],
-                intensity=[0, 1, 1, 0],
-            )
-            write_las(
-                input_dir / 'nested' / 'second.las',
-                classifications=[2, 1],
-                intensity=[1, 0],
-            )
-            write_las(
-                input_dir / 'ignored_mod.las',
-                classifications=[2, 2],
-                intensity=[0, 0],
-            )
+    with pytest.raises(SystemExit):
+        evaluation.parser([
+            "--model_name", "Network_2.pt", "--raw_path", str(tmp_path)
+        ])
+    with pytest.raises(SystemExit):
+        evaluation.parser([
+            "--model_name", "Network_2", "--raw_path", str(tmp_path),
+            "--max_points", "0",
+        ])
 
-            predictions, targets = evaluation.collect_labels(
-                FixedSegmenter(),
-                input_dir,
-            )
 
-        np.testing.assert_array_equal(predictions, [0, 1, 0, 1, 0])
-        np.testing.assert_array_equal(targets, [0, 1, 0, 1, 0])
-        self.assertEqual(predictions.dtype, np.int8)
-        self.assertEqual(targets.dtype, np.int8)
+def test_model_paths_keep_existing_training_results_layout():
+    paths = evaluation._model_paths("Network_2")
+    assert paths["model_path"].as_posix().endswith(
+        "model_pipeline/training_results/Network/Network_2.pt"
+    )
+    assert paths["config_path"].as_posix().endswith(
+        "model_pipeline/training_results/Network/dict_files/Network_2_config.json"
+    )
 
-    def test_samples_at_most_max_points_before_segmenting_each_file(self):
-        with tempfile.TemporaryDirectory() as directory:
-            input_dir = pathlib.Path(directory)
-            write_las(
-                input_dir / 'first.las',
-                classifications=[1, 2, 0, 1, 2],
-                intensity=[0, 1, 1, 0, 1],
-            )
-            write_las(
-                input_dir / 'second.las',
-                classifications=[2, 0],
-                intensity=[1, 0],
-            )
-            segmenter = RecordingSegmenter()
 
-            with patch.object(
-                evaluation.np.random,
-                'choice',
-                return_value=np.array([0, 3]),
-            ):
-                predictions, targets = evaluation.collect_labels(
-                    segmenter,
-                    input_dir,
-                    max_points_per_file=2,
-                )
+def test_run_evaluation_removes_temporary_samples(tmp_path, monkeypatch):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    cloud = raw / "cloud.laz"
+    cloud.touch()
+    model = tmp_path / "Network_2.pt"
+    config = tmp_path / "Network_2_config.json"
+    model.touch()
+    config.touch()
+    report_dir = tmp_path / "reports"
+    temp_paths = []
 
-        self.assertEqual(segmenter.point_counts, [2, 1])
-        np.testing.assert_array_equal(predictions, [0, 0, 1])
-        np.testing.assert_array_equal(targets, [0, 0, 1])
+    monkeypatch.setattr(evaluation, "_cloud_files", lambda path: [cloud])
+    monkeypatch.setattr(evaluation, "_build_segmenter", lambda *args, **kwargs: SimpleNamespace(n_classes=2))
+    monkeypatch.setattr(
+        evaluation,
+        "_model_paths",
+        lambda name: {
+            "model_dir": tmp_path, "config_dir": tmp_path,
+            "model_path": model, "config_path": config,
+            "report_dir": report_dir,
+        },
+    )
 
-    def test_rejects_negative_max_points_per_file(self):
-        with self.assertRaisesRegex(ValueError, 'cannot be negative'):
-            evaluation.collect_labels(
-                FixedSegmenter(),
-                pathlib.Path('unused'),
-                max_points_per_file=-1,
-            )
+    def collect(segmenter, files, max_points, temp_dir, rng, verbose=True):
+        temp_paths.append(temp_dir)
+        sample = temp_dir / "sample.npy"
+        np.save(sample, np.array([[0, 0], [1, 1]]))
+        return {"sample_paths": [sample], "processed_files": 1,
+                "labeled_files": 1, "sampled_points": 2}
 
-    def test_metrics_use_hard_labels_only(self):
-        metrics = evaluation.calculate_metrics(
-            predictions=np.array([0, 0, 0, 1]),
-            targets=np.array([0, 0, 1, 1]),
-            num_classes=2,
+    monkeypatch.setattr(evaluation, "collect_samples", collect)
+    monkeypatch.setattr(evaluation, "ClassificationReport", lambda **kwargs: None)
+    args = SimpleNamespace(
+        model_name="Network_2", raw_path=raw, device="cpu", mode=1,
+        max_points=50_000,
+    )
+
+    metrics = evaluation.run_evaluation(args)
+
+    assert metrics["accuracy"] == 1.0
+    assert temp_paths and not temp_paths[0].exists()
+
+
+def test_dry_run_does_not_read_or_segment_clouds(tmp_path, monkeypatch):
+    args = SimpleNamespace(
+        model_name="Network_2", raw_path=tmp_path, device="cpu", mode=0,
+        max_points=50_000,
+    )
+    monkeypatch.setattr(evaluation, "_cloud_files", lambda path: [tmp_path / "a.laz"])
+    monkeypatch.setattr(evaluation, "_validated_segmenter", lambda args: object())
+    monkeypatch.setattr(
+        evaluation.laspy, "read",
+        lambda path: pytest.fail("dry run read a cloud"),
+    )
+
+    evaluation.run_dry_run(args)
+
+
+def test_collect_samples_qualifies_reader_errors_with_source_path(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "broken.laz"
+    path.touch()
+    monkeypatch.setattr(
+        evaluation.laspy, "read", lambda source: (_ for _ in ()).throw(ValueError("bad header"))
+    )
+
+    with pytest.raises(RuntimeError, match=r"broken\.laz.*bad header"):
+        evaluation.collect_samples(
+            SimpleNamespace(n_classes=2), [path], 10, tmp_path,
+            np.random.default_rng(0), False,
         )
 
-        self.assertAlmostEqual(metrics['accuracy'], 0.75)
-        self.assertAlmostEqual(metrics['miou'], 7.0 / 12.0)
-        np.testing.assert_allclose(metrics['class_iou'], [2.0 / 3.0, 0.5])
-        self.assertNotIn('probabilities', metrics)
-        self.assertNotIn('loss', metrics)
 
-    def test_frontend_saves_confusion_matrix_and_report_with_old_names(self):
-        predictions = np.array([0, 1, 0, 1], dtype=np.int8)
-        targets = np.array([0, 1, 1, 1], dtype=np.int8)
+def test_run_evaluation_cleans_samples_when_later_file_fails(
+    tmp_path, monkeypatch
+):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    files = [raw / "first.laz", raw / "broken.laz"]
+    for path in files:
+        path.touch()
+    good_cloud = SimpleNamespace(
+        x=np.array([0.0]), y=np.array([0.0]), z=np.array([0.0]),
+        intensity=np.array([1]), classification=np.array([1]),
+    )
+    reads = iter([good_cloud, ValueError("bad header")])
 
-        with tempfile.TemporaryDirectory() as directory:
-            plot_dir = pathlib.Path(directory) / 'plots'
-            report = {}
+    def read(path):
+        value = next(reads)
+        if isinstance(value, Exception):
+            raise value
+        return value
 
-            with patch.object(
-                evaluation,
-                'collect_labels',
-                return_value=(predictions, targets),
-            ), patch.object(evaluation, 'Plotter', PlotRecorder), patch.object(
-                evaluation,
-                'ClassificationReport',
-                side_effect=lambda **kwargs: report.update(kwargs),
-            ):
-                metrics = evaluation.eval_model_front(
-                    segmenter=FixedSegmenter(),
-                    input_path=pathlib.Path('unused'),
-                    model_path=pathlib.Path('RandLANet_1.pt'),
-                    plot_dir=plot_dir,
-                )
+    temp_paths = []
+    real_collect = evaluation.collect_samples
 
-        self.assertEqual(metrics['accuracy'], 0.75)
-        self.assertEqual(len(PlotRecorder.calls), 1)
-        self.assertEqual(
-            PlotRecorder.calls[0][0],
-            'confusion_matrix_RandLANet_1.png',
-        )
-        self.assertEqual(
-            report['file_path'].name,
-            'classification_report_RandLANet_1.txt',
-        )
-        self.assertIn('Accuracy:', report['additional_info'])
-        self.assertIn('mIoU:', report['additional_info'])
-        self.assertNotIn('Loss:', report['additional_info'])
+    def collect(*args, **kwargs):
+        temp_paths.append(args[3])
+        return real_collect(*args, **kwargs)
 
-    def test_segmenter_can_load_config_and_model_from_separate_directories(self):
-        config = {
-            'model_config': {},
-            'num_points': 4,
-            'batch_size': 1,
-            'num_classes': 2,
-        }
+    monkeypatch.setattr(evaluation, "_cloud_files", lambda path: files)
+    monkeypatch.setattr(
+        evaluation, "_validated_segmenter",
+        lambda args: SimpleNamespace(
+            n_classes=2,
+            segment_pcd=lambda points, intensity: np.zeros(len(points), dtype=np.int64),
+        ),
+    )
+    monkeypatch.setattr(evaluation, "collect_samples", collect)
+    monkeypatch.setattr(evaluation.laspy, "read", read)
+    args = SimpleNamespace(
+        model_name="Network_2", raw_path=raw, device="cpu", mode=1,
+        max_points=10,
+    )
 
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            config_dir = root / 'dict_files'
-            model_dir = root / 'models'
+    with pytest.raises(RuntimeError, match="broken.laz"):
+        evaluation.run_evaluation(args)
 
-            with patch.object(
-                array_processing.SegmentClass,
-                '_load_config',
-                return_value=config,
-            ) as load_config, patch.object(
-                array_processing.SegmentClass,
-                '_load_model',
-                return_value=torch.nn.Identity(),
-            ) as load_model:
-                array_processing.SegmentClass(
-                    model_name='RandLANet_1',
-                    config_dir=config_dir,
-                    model_dir=model_dir,
-                )
-
-        load_config.assert_called_once_with(config_dir)
-        load_model.assert_called_once_with(model_dir)
-
-    def test_parser_requires_only_model_name(self):
-        args = evaluation.parser(['--model_name', 'RandLANet_1'])
-
-        self.assertEqual(args.model_name, 'RandLANet_1')
-        self.assertFalse(hasattr(args, 'input_path'))
-        self.assertFalse(hasattr(args, 'verbose'))
-        self.assertFalse(hasattr(args, 'device'))
-
-    def test_main_uses_configured_input_path_and_enables_progress(self):
-        input_path = pathlib.Path('/configured/raw/test')
-
-        class ConfigSegmenter:
-            def __init__(self, **kwargs):
-                self.kwargs = kwargs
-                self.config = {'data_path_test': str(input_path)}
-
-        with patch.object(
-            evaluation,
-            'parser',
-            return_value=Namespace(model_name='RandLANet_1'),
-        ), patch.object(torch.cuda, 'is_available', return_value=True), patch.object(
-            evaluation,
-            'SegmentClass',
-            ConfigSegmenter,
-        ), patch.object(evaluation, 'eval_model_front') as evaluate:
-            evaluation.main()
-
-        segmenter = evaluate.call_args.kwargs['segmenter']
-        self.assertTrue(segmenter.kwargs['pbar_bool'])
-        self.assertEqual(evaluate.call_args.kwargs['input_path'], input_path)
-        self.assertTrue(evaluate.call_args.kwargs['verbose'])
+    assert temp_paths and not temp_paths[0].exists()
 
 
-if __name__ == '__main__':
-    unittest.main()
+def test_dales_segmenter_loads_config_and_model_from_separate_directories(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def load_config(self, directory):
+        calls.append(("config", pth.Path(directory)))
+        self._config = {"num_classes": 8, "model_config": {"max_voxel_dim": 20}}
+        self._model_config = self._config["model_config"]
+        self.voxel_size_small = 20
+        return self._config
+
+    def load_model(self, directory):
+        calls.append(("model", pth.Path(directory)))
+        return object()
+
+    monkeypatch.setattr(array_processing.SegmentClass, "_load_config", load_config)
+    monkeypatch.setattr(array_processing.SegmentClass, "_load_segmModel", load_model)
+
+    segmenter = array_processing.SegmentClass(
+        model_name="DALES_1",
+        config_dir=tmp_path / "configs",
+        model_dir=tmp_path / "models",
+    )
+
+    assert calls == [
+        ("config", tmp_path / "configs"),
+        ("model", tmp_path / "models"),
+    ]
+    assert segmenter.n_classes == 8
