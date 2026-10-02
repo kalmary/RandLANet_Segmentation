@@ -7,6 +7,7 @@ from torchinfo import summary
 import argparse
 from tqdm import tqdm
 import pathlib as pth
+from typing import Any, TypedDict
 
 
 
@@ -32,6 +33,79 @@ else:
     )
 
 
+class EvaluationMetrics(TypedDict):
+    accuracy: float
+    miou: float
+    class_iou: np.ndarray
+    predictions: np.ndarray
+    targets: np.ndarray
+
+
+def _stratified_indices(
+    targets: np.ndarray,
+    max_points: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    targets = np.asarray(targets).reshape(-1)
+    if max_points <= 0:
+        raise ValueError('max_points must be positive')
+    if targets.size <= max_points:
+        return np.arange(targets.size, dtype=np.int64)
+
+    classes, counts = np.unique(targets, return_counts=True)
+    quotas = np.zeros(len(classes), dtype=np.int64)
+    if max_points >= len(classes):
+        quotas[:] = 1
+    remaining = max_points - int(quotas.sum())
+    capacities = counts - quotas
+    if remaining:
+        exact = capacities * (remaining / capacities.sum())
+        additions = np.minimum(np.floor(exact).astype(np.int64), capacities)
+        quotas += additions
+        remaining -= int(additions.sum())
+        order = np.argsort(-(exact - np.floor(exact)), kind='stable')
+        for class_index in order:
+            if remaining == 0:
+                break
+            if quotas[class_index] < counts[class_index]:
+                quotas[class_index] += 1
+                remaining -= 1
+
+    selected = [
+        rng.choice(np.flatnonzero(targets == label), size=quota, replace=False)
+        for label, quota in zip(classes, quotas)
+        if quota
+    ]
+    return np.sort(np.concatenate(selected)).astype(np.int64, copy=False)
+
+
+def calculate_metrics(
+    predictions: np.ndarray,
+    targets: np.ndarray,
+    num_classes: int,
+) -> EvaluationMetrics:
+    predictions = np.asarray(predictions).reshape(-1)
+    targets = np.asarray(targets).reshape(-1)
+    if predictions.shape != targets.shape:
+        raise ValueError('predictions and targets must have the same shape')
+    if targets.size == 0:
+        raise ValueError('predictions and targets cannot be empty')
+    for name, values in [('predictions', predictions), ('targets', targets)]:
+        if values.min() < 0 or values.max() >= num_classes:
+            raise ValueError(f'{name} are outside the model class range')
+
+    miou, class_iou = compute_mIoU(
+        torch.from_numpy(predictions.astype(np.int64, copy=False)),
+        torch.from_numpy(targets.astype(np.int64, copy=False)),
+        num_classes,
+    )
+    return {
+        'accuracy': float(np.mean(predictions == targets)),
+        'miou': miou,
+        'class_iou': class_iou.cpu().numpy(),
+        'predictions': predictions,
+        'targets': targets,
+    }
 def _eval_model(config_dict: dict,
                 model: nn.Module) -> tuple[list, list, np.ndarray, np.ndarray, np.ndarray]:
     device_gpu = torch.device('cuda')
@@ -241,7 +315,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
 
 
