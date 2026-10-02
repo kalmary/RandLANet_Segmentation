@@ -143,3 +143,92 @@ def test_collect_samples_infers_unlabeled_cloud_without_writing_sample(
     assert calls == [1]
     assert summary["sample_paths"] == []
     assert summary["labeled_files"] == 0
+
+
+def test_parser_exposes_raw_evaluation_contract(tmp_path):
+    args = evaluation.parser([
+        "--model_name", "Network_2", "--raw_path", str(tmp_path)
+    ])
+    assert args.device == "cpu"
+    assert args.mode == 0
+    assert args.max_points == 50_000
+    assert args.raw_path == tmp_path
+
+    with pytest.raises(SystemExit):
+        evaluation.parser([
+            "--model_name", "Network_2.pt", "--raw_path", str(tmp_path)
+        ])
+    with pytest.raises(SystemExit):
+        evaluation.parser([
+            "--model_name", "Network_2", "--raw_path", str(tmp_path),
+            "--max_points", "0",
+        ])
+
+
+def test_model_paths_keep_existing_training_results_layout():
+    paths = evaluation._model_paths("Network_2")
+    assert paths["model_path"].as_posix().endswith(
+        "model_pipeline/training_results/Network/Network_2.pt"
+    )
+    assert paths["config_path"].as_posix().endswith(
+        "model_pipeline/training_results/Network/dict_files/Network_2_config.json"
+    )
+
+
+def test_run_evaluation_removes_temporary_samples(tmp_path, monkeypatch):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    cloud = raw / "cloud.laz"
+    cloud.touch()
+    model = tmp_path / "Network_2.pt"
+    config = tmp_path / "Network_2_config.json"
+    model.touch()
+    config.touch()
+    report_dir = tmp_path / "reports"
+    temp_paths = []
+
+    monkeypatch.setattr(evaluation, "_cloud_files", lambda path: [cloud])
+    monkeypatch.setattr(evaluation, "_build_segmenter", lambda *args, **kwargs: SimpleNamespace(n_classes=2))
+    monkeypatch.setattr(
+        evaluation,
+        "_model_paths",
+        lambda name: {
+            "model_dir": tmp_path, "config_dir": tmp_path,
+            "model_path": model, "config_path": config,
+            "report_dir": report_dir,
+        },
+    )
+
+    def collect(segmenter, files, max_points, temp_dir, rng, verbose=True):
+        temp_paths.append(temp_dir)
+        sample = temp_dir / "sample.npy"
+        np.save(sample, np.array([[0, 0], [1, 1]]))
+        return {"sample_paths": [sample], "processed_files": 1,
+                "labeled_files": 1, "sampled_points": 2}
+
+    monkeypatch.setattr(evaluation, "collect_samples", collect)
+    monkeypatch.setattr(evaluation, "ClassificationReport", lambda **kwargs: None)
+    args = SimpleNamespace(
+        model_name="Network_2", raw_path=raw, device="cpu", mode=1,
+        max_points=50_000,
+    )
+
+    metrics = evaluation.run_evaluation(args)
+
+    assert metrics["accuracy"] == 1.0
+    assert temp_paths and not temp_paths[0].exists()
+
+
+def test_dry_run_does_not_read_or_segment_clouds(tmp_path, monkeypatch):
+    args = SimpleNamespace(
+        model_name="Network_2", raw_path=tmp_path, device="cpu", mode=0,
+        max_points=50_000,
+    )
+    monkeypatch.setattr(evaluation, "_cloud_files", lambda path: [tmp_path / "a.laz"])
+    monkeypatch.setattr(evaluation, "_validated_segmenter", lambda args: object())
+    monkeypatch.setattr(
+        evaluation.laspy, "read",
+        lambda path: pytest.fail("dry run read a cloud"),
+    )
+
+    evaluation.run_dry_run(args)
