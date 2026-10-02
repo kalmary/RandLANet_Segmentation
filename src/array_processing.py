@@ -27,6 +27,7 @@ class SegmentClass:
                  scaled: bool = False,
                  model_name: str = None,
                  config_dir: Union[str, pth.Path] = "final_files",
+                 model_dir: Optional[Union[str, pth.Path]] = None,
                  device: torch.device = torch.device('cpu'),
                  verbose: bool = False):
         
@@ -49,11 +50,19 @@ class SegmentClass:
             self._scaler = self._init_scaler(feature_range=(0, 1))
         
         self.base_path = pth.Path(__file__).parent
-        config_dir = self.base_path.joinpath(config_dir)
+        config_dir = pth.Path(config_dir)
+        if not config_dir.is_absolute():
+            config_dir = self.base_path / config_dir
+        if model_dir is None:
+            model_dir = config_dir
+        else:
+            model_dir = pth.Path(model_dir)
+            if not model_dir.is_absolute():
+                model_dir = self.base_path / model_dir
         self._config = None
         self._model_config = None
         self._load_config(config_dir)
-        self._model = self._load_segmModel(config_dir)
+        self._model = self._load_segmModel(model_dir)
 
 
     # TODO adjust model loading 
@@ -87,6 +96,14 @@ class SegmentClass:
     @property
     def model_config(self) -> dict:
         return self._model_config
+
+    @property
+    def config(self) -> dict:
+        return self._config
+
+    @property
+    def n_classes(self) -> int:
+        return int(self._config['num_classes'])
     
     @property
     def model(self) -> nn.Module:
@@ -413,6 +430,42 @@ def test_segment_pcd_uses_big_voxels_at_fragmentation_threshold(monkeypatch):
 
     np.testing.assert_array_equal(result, np.array([1, 0], dtype=np.int32))
     assert observed == [2]
+
+
+def test_segment_class_accepts_separate_config_and_model_directories(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def load_config(self, directory):
+        calls.append(("config", pth.Path(directory)))
+        self._config = {"num_classes": 4, "model_config": {"max_voxel_dim": 20}}
+        self._model_config = self._config["model_config"]
+        self.voxel_size_small = 20
+        return self._config
+
+    def load_model(self, directory):
+        calls.append(("model", pth.Path(directory)))
+        return object()
+
+    monkeypatch.setattr(SegmentClass, "_load_config", load_config)
+    monkeypatch.setattr(SegmentClass, "_load_segmModel", load_model)
+    config_dir = tmp_path / "configs"
+    model_dir = tmp_path / "models"
+
+    segmenter = SegmentClass(
+        model_name="network_1",
+        config_dir=config_dir,
+        model_dir=model_dir,
+    )
+
+    assert calls == [("config", config_dir), ("model", model_dir)]
+    assert segmenter.config["num_classes"] == 4
+    assert segmenter.n_classes == 4
+
+    calls.clear()
+    SegmentClass(model_name="network_1", config_dir=config_dir)
+    assert calls == [("config", config_dir), ("model", config_dir)]
 
 
 
