@@ -13,6 +13,7 @@ from src.utils import knn_torch
 def test_build_preallocates_full_cache_without_concatenating_chunks(monkeypatch):
     points = torch.rand(1, 1025, 3)
     expected = torch.cdist(points, points)
+    expected.diagonal(dim1=1, dim2=2).zero_()
     real_cdist = torch.cdist
     processed_chunk_sizes = []
 

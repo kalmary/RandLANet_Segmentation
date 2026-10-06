@@ -27,6 +27,9 @@ class KNNCache:
                 self.pcd[:, start:end],
                 self.pcd,
             )
+            local_indices = torch.arange(end - start, device=self.pcd.device)
+            global_indices = torch.arange(start, end, device=self.pcd.device)
+            chunk_distances[:, local_indices, global_indices] = 0
             self.distances[:, start:end].copy_(chunk_distances)
             del chunk_distances
     
