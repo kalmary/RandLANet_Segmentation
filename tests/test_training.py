@@ -161,7 +161,7 @@ def test_repeats_are_independent_and_use_updated_loader_api(
 
     monkeypatch.setattr(train_case, "make_loader", make_loader)
     monkeypatch.setattr(train_case, "get_dataset_len", get_dataset_len)
-    monkeypatch.setattr(train_case, "compute_pos_weights_prob", compute_weights)
+    monkeypatch.setattr(train_case, "compute_pos_weights_cloud", compute_weights)
     monkeypatch.setattr(train_case, "FocalLoss", TrackingFocalLoss)
     monkeypatch.setattr(train_case, "RandLANet", make_model)
     monkeypatch.setattr(train_case.optim, "AdamW", make_optimizer)

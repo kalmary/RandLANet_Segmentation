@@ -16,7 +16,7 @@ src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
 from utils import compute_mIoU
-from utils import compute_pos_weights_prob, get_dataset_len, FocalLoss
+from utils import compute_pos_weights_cloud, get_dataset_len, FocalLoss
 from utils import wrap_hist
 from utils.nn_utils import calculate_accuracy
 
@@ -63,12 +63,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
     try:
 
-        class_weights_t = compute_pos_weights_prob(data_dir=training_dict['data_path_train'],
+        class_weights_t = compute_pos_weights_cloud(data_dir=training_dict['data_path_train'],
                                                 num_classes=training_dict['num_classes'],
                                                 power=0.5)
 
         
-        class_weights_v = compute_pos_weights_prob(data_dir=training_dict['data_path_val'],
+        class_weights_v = compute_pos_weights_cloud(data_dir=training_dict['data_path_val'],
                                                 num_classes=training_dict['num_classes'],
                                                 power=0.5
         )
