@@ -1,8 +1,44 @@
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 import pytest
+
+
+@pytest.mark.parametrize(
+    'module',
+    [
+        'array_processing',
+        'model_pipeline.TrainSegmAutomated',
+        'model_pipeline.EvalSegm_RandLANet',
+        'model_pipeline._train_single_case',
+        'model_pipeline._data_loader',
+        'data_processing.downsample_LAZ',
+    ],
+)
+def test_workflows_import_from_parent_with_their_own_utilities(module, tmp_path):
+    code = f"""
+import importlib
+
+module = importlib.import_module('src.PCDSegmentation.src.{module}')
+utilities = importlib.import_module('src.PCDSegmentation.src.utils.nn_utils')
+for name in ('load_json', 'load_model', 'compute_pos_weights_h5', 'FocalLoss', 'Plotter'):
+    if name in vars(module):
+        assert getattr(module, name) is getattr(utilities, name), name
+"""
+    env = os.environ.copy()
+    env['MPLCONFIGDIR'] = str(tmp_path / 'matplotlib')
+    result = subprocess.run(
+        [sys.executable, '-c', code],
+        cwd=Path(__file__).resolve().parents[3],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
