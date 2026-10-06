@@ -85,7 +85,7 @@ class TrainingAutomationTests(unittest.TestCase):
             ), patch.object(
                 training,
                 'train_model',
-                return_value=iter(((model, history),)),
+                return_value=iter(((model, history, False),)),
             ), patch.object(training, 'summary'):
                 training.case_based_training([config], 'RandLANet_1')
 
