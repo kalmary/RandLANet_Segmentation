@@ -10,14 +10,14 @@ if __package__:
     from .RandLANet_CB import RandLANet
     from ._data_loader import Dataset
     from ..utils import (
-        EarlyStopping, compute_mIoU, calculate_accuracy,
+        EarlyStopping, compute_miou, calculate_accuracy,
         compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
     )
 else:
     from RandLANet_CB import RandLANet
     from _data_loader import Dataset
     from utils import (
-        EarlyStopping, compute_mIoU, calculate_accuracy,
+        EarlyStopping, compute_miou, calculate_accuracy,
         compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
     )
 
@@ -217,12 +217,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         accuracy_v = calculate_accuracy(outputs, batch_y)
 
-                        mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+                        miou, _ = compute_miou(outputs, batch_y, training_dict['num_classes'])
 
 
                         epoch_loss_v += loss_v.item() * batch_y.size(0)
                         epoch_accuracy_v += accuracy_v * batch_y.size(0)
-                        epoch_miou_v += mIoU * batch_y.size(0)
+                        epoch_miou_v += miou * batch_y.size(0)
                         epoch_samples_v += batch_y.size(0)
 
                         avg_loss_v = epoch_loss_v / epoch_samples_v

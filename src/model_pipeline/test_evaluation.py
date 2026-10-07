@@ -207,7 +207,7 @@ def test_run_evaluation_removes_temporary_samples(tmp_path, monkeypatch):
                 "labeled_files": 1, "sampled_points": 2}
 
     monkeypatch.setattr(evaluation, "collect_samples", collect)
-    monkeypatch.setattr(evaluation, "ClassificationReport", lambda **kwargs: None)
+    monkeypatch.setattr(evaluation, "classification_report", lambda **kwargs: None)
     args = SimpleNamespace(
         model_name="Network_2", raw_path=raw, device="cpu", mode=1,
         max_points=50_000,

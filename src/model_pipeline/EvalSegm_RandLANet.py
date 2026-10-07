@@ -11,12 +11,12 @@ from tqdm import tqdm
 
 if __package__:
     from ..array_processing import SegmentClass
-    from ..utils import ClassificationReport, compute_mIoU
+    from ..utils import classification_report, compute_miou
 else:
     src_dir = pth.Path(__file__).parent.parent
     sys.path.append(str(src_dir))
     from array_processing import SegmentClass
-    from utils import ClassificationReport, compute_mIoU
+    from utils import classification_report, compute_miou
 
 
 class EvaluationMetrics(TypedDict):
@@ -145,7 +145,7 @@ def calculate_metrics(predictions: np.ndarray, targets: np.ndarray, num_classes:
     for name, values in [('predictions', predictions), ('targets', targets)]:
         if values.min() < 0 or values.max() >= num_classes:
             raise ValueError(f'{name} are outside the model class range')
-    miou, class_iou = compute_mIoU(torch.from_numpy(predictions.astype(np.int64, copy=False)), torch.from_numpy(targets.astype(np.int64, copy=False)), num_classes)
+    miou, class_iou = compute_miou(torch.from_numpy(predictions.astype(np.int64, copy=False)), torch.from_numpy(targets.astype(np.int64, copy=False)), num_classes)
     return {'accuracy': float(np.mean(predictions == targets)), 'miou': miou,
             'class_iou': class_iou.cpu().numpy(), 'predictions': predictions,
             'targets': targets}
@@ -211,7 +211,7 @@ def run_evaluation(args: argparse.Namespace) -> EvaluationMetrics:
         metrics = calculate_metrics(combined[:, 1], combined[:, 0], segmenter.n_classes)
     paths['report_dir'].mkdir(exist_ok=True, parents=True)
     info = f"Accuracy: {metrics['accuracy']}\nmIoU: {metrics['miou']}\nIoU per class: {metrics['class_iou']}"
-    ClassificationReport(file_path=paths['report_dir'] / f'classification_report_{args.model_name}.txt', pred=metrics['predictions'], target=metrics['targets'], additional_info=info)
+    classification_report(file_path=paths['report_dir'] / f'classification_report_{args.model_name}.txt', pred=metrics['predictions'], target=metrics['targets'], additional_info=info)
     print(f"Processed files: {summary['processed_files']}")
     print(f"Sampled points: {summary['sampled_points']}")
     print(info)

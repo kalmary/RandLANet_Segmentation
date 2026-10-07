@@ -10,6 +10,6 @@ def __getattr__(name):
         from .plot_cloud import plot_cloud
 
         return plot_cloud
-    if name in {"Plotter", "ClassificationReport"}:
+    if name in {"Plotter", "classification_report"}:
         return getattr(_nn_utils, name)
     raise AttributeError(name)
