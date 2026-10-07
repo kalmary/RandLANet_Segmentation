@@ -21,8 +21,8 @@ def test_workflows_import_from_parent_with_their_own_utilities(module, tmp_path)
     code = f"""
 import importlib
 
-module = importlib.import_module('src.PCDSegmentation.src.{module}')
-utilities = importlib.import_module('src.PCDSegmentation.src.utils.nn_utils')
+module = importlib.import_module('src.pcd_segmentation.src.{module}')
+utilities = importlib.import_module('src.pcd_segmentation.src.utils.nn_utils')
 for name in ('load_json', 'load_model', 'compute_pos_weights_h5', 'FocalLoss', 'Plotter'):
     if name in vars(module):
         assert getattr(module, name) is getattr(utilities, name), name
@@ -75,7 +75,7 @@ def test_segment_class_imports_from_parent_project_root():
         [
             sys.executable,
             "-c",
-            "from src.PCDSegmentation.src.array_processing import SegmentClass; "
+            "from src.pcd_segmentation.src.array_processing import SegmentClass; "
             "assert SegmentClass.__name__ == 'SegmentClass'",
         ],
         cwd=Path(__file__).resolve().parents[3],

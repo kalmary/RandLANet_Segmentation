@@ -15,13 +15,13 @@ import laspy
 import numpy as np
 
 if __package__:
-    from ..utils.pcd_manipulation import voxelGridFragmentation
+    from ..utils.pcd_manipulation import voxel_grid_fragmentation
     from ..utils.nn_utils import convert_str_values, load_json, save2json
     from ..utils.scaler import LogScaler
 else:
     main_dir = pth.Path(__file__).parent.parent
     sys.path.insert(0, str(main_dir))
-    from utils.pcd_manipulation import voxelGridFragmentation
+    from utils.pcd_manipulation import voxel_grid_fragmentation
     from utils.nn_utils import convert_str_values, load_json, save2json
     from utils.scaler import LogScaler
 import open3d as o3d
@@ -100,7 +100,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                 classification = classification[valid_mask]
                 classification = (classification - 1).astype(np.uint8, copy=False)
 
-                for i_0, (sampled_idx_0, noise_0) in enumerate(voxelGridFragmentation(points,
+                for i_0, (sampled_idx_0, noise_0) in enumerate(voxel_grid_fragmentation(points,
                                                                                       voxel_size=np.array([200., 200.]),
                                                                                       overlap_ratio=0.,
                                                                                       num_points=0,
@@ -117,7 +117,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
 
 
-                    for i, (sampled_idx, noise) in enumerate(voxelGridFragmentation(points_chunk_0,
+                    for i, (sampled_idx, noise) in enumerate(voxel_grid_fragmentation(points_chunk_0,
                                                                                     voxel_size=np.array([20., 20.]), #TODO check if it works, update in other places
                                                                                     overlap_ratio=0.25,
                                                                                     num_points=2*8192,

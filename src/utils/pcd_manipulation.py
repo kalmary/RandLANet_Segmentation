@@ -147,7 +147,7 @@ def transform_points(
     return points
 
 
-def voxelGridFragmentation(data,
+def voxel_grid_fragmentation(data,
                            voxel_size: np.array = np.array([25., 25.]),
                            num_points = 0,
                            overlap_ratio: float = 0.4,

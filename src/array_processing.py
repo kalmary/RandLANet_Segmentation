@@ -229,7 +229,7 @@ class SegmentClass:
         voxel_probs_all = np.full((points.shape[0], num_classes + 1), 0.0, dtype=np.float32)
         filled_mask = np.zeros(points.shape[0], dtype=bool)
 
-        generator = pcd_manipulation.voxelGridFragmentation(points,
+        generator = pcd_manipulation.voxel_grid_fragmentation(points,
                                                             voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
                                                             num_points = self._config['num_points'],
                                                             overlap_ratio=0.4,
@@ -302,7 +302,7 @@ class SegmentClass:
     def _segment_big_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
         labels = np.zeros(intensity.shape, dtype=np.int32)
 
-        for indices, _ in pcd_manipulation.voxelGridFragmentation(data=points,
+        for indices, _ in pcd_manipulation.voxel_grid_fragmentation(data=points,
                                                                num_points=0,
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
