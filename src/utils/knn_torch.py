@@ -3,7 +3,7 @@ import torch.nn as nn
 from typing import Tuple, Optional
 
 
-class KNNCache:
+class KnnCache:
     def __init__(self):
 
         self.distances = None
