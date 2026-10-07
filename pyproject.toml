@@ -36,7 +36,7 @@ basic = [
     "scipy>=1.16,<2",
     "tqdm>=4.67,<5",
 ]
-test = [
+dev = [
     { include-group = "basic" },
     "matplotlib>=3.10,<4",
     "optuna>=4.6,<5",

@@ -76,16 +76,16 @@ git submodule foreach --recursive git checkout development
 Create the uv environment with Python 3.12 and choose one PyTorch profile:
 ```bash
 uv sync --extra pytorch-cpu  # core runtime, CPU-only
-uv sync --group test --extra pytorch-cpu  # CPU-only on macOS, Windows, or Linux
-# macOS system profile (also CPU): uv sync --group test --extra pytorch-macos
-# Linux with CUDA 13.2: uv sync --group test --extra pytorch-linux-cuda
-# Windows with CUDA 13.2: uv sync --group test --extra pytorch-windows-cuda
+uv sync --group dev --extra pytorch-cpu  # CPU-only on macOS, Windows, or Linux
+# macOS system profile (also CPU): uv sync --group dev --extra pytorch-macos
+# Linux with CUDA 13.2: uv sync --group dev --extra pytorch-linux-cuda
+# Windows with CUDA 13.2: uv sync --group dev --extra pytorch-windows-cuda
 
 # update git submodules
 git submodule update --init --recursive
 ```
 
-The default `basic` group includes LAS/LAZ runtime support. The `test` group adds plotting and development tools. After syncing, `uv run --no-sync` preserves the selected groups and PyTorch profile.
+The default `basic` group includes LAS/LAZ runtime support. The `dev` group adds plotting and development tools. After syncing, `uv run --no-sync` preserves the selected groups and PyTorch profile.
 
 ---
 

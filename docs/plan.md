@@ -13,11 +13,11 @@
 **Files:** create `.python-version`, `pyproject.toml`, `uv.lock`; update `.gitignore` and README installation commands.
 
 - [x] Replace the legacy requirements files as sources of truth with minimal direct dependencies.
-- [x] Define `basic` for inference/headless preprocessing and `test` including `basic`, `pytest`, `matplotlib`, and `pyvista`.
+- [x] Define `basic` for inference/headless preprocessing and `dev` including `basic`, `pytest`, `matplotlib`, and `pyvista`.
 - [x] Keep plotting imports out of normal inference unless a plotting operation is explicitly requested.
 - [x] Configure PyTorch 2.14/Torchvision 0.29 CPU and CUDA 13.2 profiles without pinning NVIDIA transitive wheels.
 - [x] Preserve and verify the nested `nn_utils` submodule/package relationship.
-- [x] Verify clean basic/test syncs and current public imports.
+- [x] Verify clean basic/dev syncs and current public imports.
 
 ## Task 2: Protect interfaces and invocations
 

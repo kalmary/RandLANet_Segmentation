@@ -1047,7 +1047,7 @@ basic = [
     { name = "scipy" },
     { name = "tqdm" },
 ]
-test = [
+dev = [
     { name = "fpsample" },
     { name = "h5py" },
     { name = "joblib" },
@@ -1094,7 +1094,7 @@ basic = [
     { name = "scipy", specifier = ">=1.16,<2" },
     { name = "tqdm", specifier = ">=4.67,<5" },
 ]
-test = [
+dev = [
     { name = "fpsample", specifier = ">=0.3,<2" },
     { name = "h5py", specifier = ">=3.15,<4" },
     { name = "joblib", specifier = ">=1.5,<2" },
