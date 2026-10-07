@@ -21,15 +21,26 @@ def test_main_help_works_from_project_root(entry):
     assert "--output-path" in result.stdout
 
 
-def test_main_parser_preserves_defaults(monkeypatch):
-    from src.main import argparser
+def test_main_parser_preserves_defaults():
+    code = """
+import sys
 
-    monkeypatch.setattr(sys, "argv", ["main.py"])
-    args = argparser()
+sys.argv = ['main.py']
+from src.main import argparser
 
-    assert args.device == "cpu"
-    assert args.output_path == ""
-    assert args.mode == 0
+args = argparser()
+assert args.device == 'cpu'
+assert args.output_path == ''
+assert args.mode == 0
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(

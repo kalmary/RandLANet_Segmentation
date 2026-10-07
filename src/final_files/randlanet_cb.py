@@ -1,15 +1,10 @@
 import torch
 import torch.nn as nn
 
-import pathlib as pth
-import sys
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-try:
-    from ..utils import KnnCache
-except ImportError:
-    from utils import KnnCache
+if __package__ in {None, "", "final_files"}:
+    from utils.knn_torch import KnnCache
+else:
+    from ..utils.knn_torch import KnnCache
 
 import json
 from pathlib import Path

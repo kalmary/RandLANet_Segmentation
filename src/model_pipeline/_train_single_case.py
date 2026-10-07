@@ -9,14 +9,14 @@ from torch.utils.data import DataLoader
 if __package__:
     from .randlanet_cb import Randlanet
     from ._data_loader import Dataset
-    from ..utils import (
+    from ..utils.nn_utils import (
         EarlyStopping, compute_miou, calculate_accuracy,
         compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
     )
 else:
     from randlanet_cb import Randlanet
     from _data_loader import Dataset
-    from utils import (
+    from utils.nn_utils import (
         EarlyStopping, compute_miou, calculate_accuracy,
         compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
     )

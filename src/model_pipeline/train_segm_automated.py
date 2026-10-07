@@ -24,13 +24,13 @@ from tqdm import tqdm
 
 if __package__:
     from ._train_single_case import train_model
-    from ..utils import load_json, save_to_json, save_model, convert_str_values, Plotter
+    from ..utils.nn_utils import Plotter, convert_str_values, load_json, save_model, save_to_json
     from .randlanet_cb import Randlanet
 else:
     src_dir = pth.Path(__file__).parent.parent
     sys.path.append(str(src_dir))
     from _train_single_case import train_model
-    from utils import load_json, save_to_json, save_model, convert_str_values, Plotter
+    from utils.nn_utils import Plotter, convert_str_values, load_json, save_model, save_to_json
     from randlanet_cb import Randlanet
 
 

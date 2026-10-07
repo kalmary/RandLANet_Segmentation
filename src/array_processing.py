@@ -14,11 +14,12 @@ from sklearn.preprocessing import MinMaxScaler
 
 if __package__:
     from .final_files.randlanet_cb import Randlanet
-    from .utils import load_json, load_model, pcd_manipulation
+    from .utils import pcd_manipulation
+    from .utils.nn_utils import load_json, load_model
 else:
     from final_files.randlanet_cb import Randlanet
-
-    from utils import load_json, load_model, pcd_manipulation
+    from utils import pcd_manipulation
+    from utils.nn_utils import load_json, load_model
 
 class SegmentClass:
     def __init__(self,
@@ -373,7 +374,10 @@ def run_segmentation_example():
     labels = segmenter.segment_pcd(points=points,
                           intensity=intensity)
     
-    from utils import plot_cloud
+    if __package__:
+        from .utils.plot_cloud import plot_cloud
+    else:
+        from utils.plot_cloud import plot_cloud
     plot_cloud(points, labels)
 
 

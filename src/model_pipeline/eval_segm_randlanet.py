@@ -11,12 +11,12 @@ from tqdm import tqdm
 
 if __package__:
     from ..array_processing import SegmentClass
-    from ..utils import classification_report, compute_miou
+    from ..utils.nn_utils import classification_report, compute_miou
 else:
     src_dir = pth.Path(__file__).parent.parent
     sys.path.append(str(src_dir))
     from array_processing import SegmentClass
-    from utils import classification_report, compute_miou
+    from utils.nn_utils import classification_report, compute_miou
 
 
 class EvaluationMetrics(TypedDict):

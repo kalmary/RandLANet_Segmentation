@@ -11,9 +11,9 @@ import fpsample
 import random
 
 if __package__:
-    from ..utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
+    from ..utils.pcd_manipulation import add_gaussian_noise, rotate_points, tilt_points, transform_points
 else:
-    from utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
+    from utils.pcd_manipulation import add_gaussian_noise, rotate_points, tilt_points, transform_points
 
 class Dataset(IterableDataset):
 
