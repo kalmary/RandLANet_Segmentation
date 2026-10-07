@@ -24,13 +24,13 @@ from tqdm import tqdm
 
 if __package__:
     from ._train_single_case import train_model
-    from ..utils import load_json, save2json, save_model, convert_str_values, Plotter
+    from ..utils import load_json, save_to_json, save_model, convert_str_values, Plotter
     from .randlanet_cb import Randlanet
 else:
     src_dir = pth.Path(__file__).parent.parent
     sys.path.append(str(src_dir))
     from _train_single_case import train_model
-    from utils import load_json, save2json, save_model, convert_str_values, Plotter
+    from utils import load_json, save_to_json, save_model, convert_str_values, Plotter
     from randlanet_cb import Randlanet
 
 
@@ -257,7 +257,7 @@ class Checkpoint:
         best_config['device'] = str(best_config['device'])
 
         config_path = dict_files_dir.joinpath(f'{model_path.stem}_config.json')
-        save2json(best_config, config_path)
+        save_to_json(best_config, config_path)
         logger.info(f'New config for model {model_name} saved to: {config_path}')
 
 
