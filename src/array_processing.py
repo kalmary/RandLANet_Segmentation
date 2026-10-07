@@ -3,7 +3,7 @@ import os
 import pathlib as pth
 import sys
 from multiprocessing import shared_memory
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -11,7 +11,6 @@ import torch.nn as nn
 from joblib import Parallel, delayed
 from sklearn.neighbors import KDTree
 from sklearn.preprocessing import MinMaxScaler
-from tqdm import tqdm
 
 if __package__:
     from .final_files.randlanet_cb import Randlanet
