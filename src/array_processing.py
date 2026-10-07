@@ -1,23 +1,24 @@
-from typing import Union, Optional, Any, Tuple, Dict, List
-from joblib import Parallel, delayed
-from multiprocessing import shared_memory
-import pathlib as pth
-import os
-import sys
 import gc
-from tqdm import tqdm
+import os
+import pathlib as pth
+import sys
+from multiprocessing import shared_memory
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.neighbors import KDTree
 import torch
 import torch.nn as nn
+from joblib import Parallel, delayed
+from sklearn.neighbors import KDTree
+from sklearn.preprocessing import MinMaxScaler
+from tqdm import tqdm
 
 if __package__:
     from .final_files.RandLANet_CB import RandLANet
     from .utils import load_json, load_model, pcd_manipulation
 else:
     from final_files.RandLANet_CB import RandLANet
+
     from utils import load_json, load_model, pcd_manipulation
 
 class SegmentClass:
@@ -352,8 +353,9 @@ class SegmentClass:
 def run_segmentation_example():
     path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
 
-    import laspy
     import pathlib as pth
+
+    import laspy
 
     path2laz = pth.Path(path2laz)
     las = laspy.read(path2laz)
