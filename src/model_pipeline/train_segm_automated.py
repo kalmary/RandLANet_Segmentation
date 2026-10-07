@@ -25,13 +25,13 @@ from tqdm import tqdm
 if __package__:
     from ._train_single_case import train_model
     from ..utils import load_json, save2json, save_model, convert_str_values, Plotter
-    from .RandLANet_CB import RandLANet
+    from .randlanet_cb import Randlanet
 else:
     src_dir = pth.Path(__file__).parent.parent
     sys.path.append(str(src_dir))
     from _train_single_case import train_model
     from utils import load_json, save2json, save_model, convert_str_values, Plotter
-    from RandLANet_CB import RandLANet
+    from randlanet_cb import Randlanet
 
 
 def check_models(model_configs_paths: list[pth.Path],
@@ -54,7 +54,7 @@ def check_models(model_configs_paths: list[pth.Path],
         model_config = convert_str_values(model_config)
 
         try:
-            model = RandLANet(model_config, 10)
+            model = Randlanet(model_config, 10)
             model.eval()
             model_summary = summary(model, input_size=max_input_size, verbose=0)
             estimated_memory_GB = (model_summary.total_param_bytes + model_summary.total_output_bytes) / (1024 ** 3 )
@@ -552,7 +552,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--model_name',
+        '--model-name',
         type=str,
         help=(
             "Base of the model's name.\n"

@@ -129,7 +129,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--model_name',
+        '--model-name',
         type=str,
         help=(
             "Base of the model's name.\n"
@@ -150,7 +150,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--input_path',
+        '--input-path',
         type=str,
         help=(
             "Path to the directory with raw input files.\n"
@@ -159,7 +159,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--output_path',
+        '--output-path',
         type=str,
         default='',
         help=(

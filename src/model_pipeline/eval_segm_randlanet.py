@@ -64,11 +64,11 @@ def _raw_directory(value: str) -> pth.Path:
 
 def parser(args: Sequence[str] | None = None) -> argparse.Namespace:
     cli = argparse.ArgumentParser(description='Evaluate complete raw LAS/LAZ clouds.')
-    cli.add_argument('--model_name', required=True, type=_model_name)
-    cli.add_argument('--raw_path', required=True, type=_raw_directory)
+    cli.add_argument('--model-name', required=True, type=_model_name)
+    cli.add_argument('--raw-path', required=True, type=_raw_directory)
     cli.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
     cli.add_argument('--mode', choices=[0, 1], type=int, default=0)
-    cli.add_argument('--max_points', type=_positive_int, default=50_000)
+    cli.add_argument('--max-points', type=_positive_int, default=50_000)
     return cli.parse_args(args)
 
 

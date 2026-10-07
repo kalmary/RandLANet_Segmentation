@@ -7,14 +7,14 @@ import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
 if __package__:
-    from .RandLANet_CB import RandLANet
+    from .randlanet_cb import Randlanet
     from ._data_loader import Dataset
     from ..utils import (
         EarlyStopping, compute_miou, calculate_accuracy,
         compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
     )
 else:
-    from RandLANet_CB import RandLANet
+    from randlanet_cb import Randlanet
     from _data_loader import Dataset
     from utils import (
         EarlyStopping, compute_miou, calculate_accuracy,
@@ -26,7 +26,7 @@ from typing import Union, Generator, Any
 from dataclasses import dataclass
 
 @dataclass
-class dummy_pruner:
+class DummyPruner:
     stop_training = False
 
     @staticmethod
@@ -78,13 +78,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                         num_classes=training_dict['num_classes'],
                                         power=0.25)
     
-    early_stop = dummy_pruner()
+    early_stop = DummyPruner()
     # early_stop = EarlyStopping(patience=10, delta=0.001, mode="maximize", verbose=False)
 
     try:
 
         if training_dict['model'] is None:
-            model = RandLANet(model_config=training_dict['model_config'],
+            model = Randlanet(model_config=training_dict['model_config'],
                             n_classes=training_dict['num_classes'])
         else:
             model = training_dict['model']

@@ -39,13 +39,13 @@ Key modifications we added:
 ├── img                          #README images and diagrams
 ├── src
 │   ├── data_processing
-│   │   └── downsample_LAZ.py    #Preprocessing pipeline for LAZ files and training datasets
+│   │   └── downsample_laz.py    #Preprocessing pipeline for LAZ files and training datasets
 │   ├── final_files              #Pretrained/final models, configs and inference model code
 │   ├── main.py                  #Main semantic segmentation entrypoint
 │   ├── model_pipeline
-│   │   ├── TrainSegmAutomated.py
-│   │   ├── EvalSegm_RandLANet.py
-│   │   ├── RandLANet_CB.py
+│   │   ├── train_segm_automated.py
+│   │   ├── eval_segm_randlanet.py
+│   │   ├── randlanet_cb.py
 │   │   ├── model_configs        #Model architecture configs
 │   │   ├── training_configs     #Training parameter configs
 │   │   └── training_results     #Training and evaluation outputs
@@ -102,7 +102,7 @@ uv run --no-sync python -m src.main --help
 
 Before training a model, data preprocessing must be done. To do so run:
 ```bash
-uv run --no-sync python src/data_processing/downsample_LAZ.py --source_path path/to/raw/data --decimated_path path/to/decimated/pcds --converted_path path/to/final/processed/files
+uv run --no-sync python src/data_processing/downsample_laz.py --source-path path/to/raw/data --decimated-path path/to/decimated/pcds --converted-path path/to/final/processed/files
 ```
 Paths used when processing:
 - source_path: directory with raw (.LAZ by default) point clouds,
@@ -122,7 +122,7 @@ Files with `_single` suffix are meant for single training without any optimizati
 To start training run:
 ```bash
 cd src/model_pipeline
-uv run --no-sync python src/model_pipeline/TrainSegmAutomated.py --model_name MODEL_NAME --device cpu --mode 2
+uv run --no-sync python src/model_pipeline/train_segm_automated.py --model-name MODEL_NAME --device cpu --mode 2
 ```
 Available flags:
 - ``model_name`` - name of your model. Results are stored in ``src/model_pipeline/training_results/MODEL_NAME``,
@@ -134,7 +134,7 @@ Available flags:
     - `3` - check models - run this to get a rough idea of model resource demands.
  
 
-For most optimal results we recommend using options based on multidimensional space of hyperparameters. If you choose Optuna based option you can change ``n_trials`` in ``main`` function of ``TrainSegmAutomated.py``:
+For most optimal results we recommend using options based on multidimensional space of hyperparameters. If you choose Optuna based option you can change ``n_trials`` in ``main`` function of ``train_segm_automated.py``:
 ```python
 optuna_based_training(exp_config=exp_configs,
                       model_name=model_name,
@@ -148,11 +148,11 @@ For more guidance/ guidance when running code, run it with ``--help`` flag.
 
 ## 3. Evaluation <a name="evaluation"></a>
 
-To evaluate trained model, run EvalSegm_RandLANet.py with proper flags:
+To evaluate trained model, run eval_segm_randlanet.py with proper flags:
 
 ```bash
 cd src/model_pipeline
-uv run --no-sync python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --device cpu --mode 1
+uv run --no-sync python src/model_pipeline/eval_segm_randlanet.py --model-name MODEL_NAME --device cpu --mode 1
 ```
 ``model_name`` flag must be the exact name of model you got from training, but without extension name. For example:
 ```
@@ -177,7 +177,7 @@ Once models are trained, the best models and configs are choosen, copy the files
 
 To perform .LAZ files semantic segmentation, based on pretrained model run:
 ```bash
-uv run --no-sync python src/main.py --model_name MODEL_NAME --device cpu --input_path path/to/raw/data --output_path path/with/processed/files --mode 1 --verbose True
+uv run --no-sync python src/main.py --model-name MODEL_NAME --device cpu --input-path path/to/raw/data --output-path path/with/processed/files --mode 1 --verbose True
 ```
 Available flags:
 - ``model_name`` - model name without its extension (.pt files supported),

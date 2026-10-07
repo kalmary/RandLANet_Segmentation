@@ -14,10 +14,10 @@ from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
 if __package__:
-    from .final_files.RandLANet_CB import RandLANet
+    from .final_files.randlanet_cb import Randlanet
     from .utils import load_json, load_model, pcd_manipulation
 else:
-    from final_files.RandLANet_CB import RandLANet
+    from final_files.randlanet_cb import Randlanet
 
     from utils import load_json, load_model, pcd_manipulation
 
@@ -63,7 +63,7 @@ class SegmentClass:
         self._config = None
         self._model_config = None
         self._load_config(config_dir)
-        self._model = self._load_segmModel(model_dir)
+        self._model = self._load_segm_model(model_dir)
 
 
     # TODO adjust model loading 
@@ -84,10 +84,10 @@ class SegmentClass:
 
         return config_dict
 
-    def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
+    def _load_segm_model(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
 
         path2model = pth.Path(model_dir).joinpath(self.model_name)
-        model = RandLANet(self._config["model_config"], self._config['num_classes'])
+        model = Randlanet(self._config["model_config"], self._config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
                                             device=self.device)
@@ -458,7 +458,7 @@ def test_segment_class_accepts_separate_config_and_model_directories(
         return object()
 
     monkeypatch.setattr(SegmentClass, "_load_config", load_config)
-    monkeypatch.setattr(SegmentClass, "_load_segmModel", load_model)
+    monkeypatch.setattr(SegmentClass, "_load_segm_model", load_model)
     config_dir = tmp_path / "configs"
     model_dir = tmp_path / "models"
 

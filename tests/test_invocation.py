@@ -16,9 +16,9 @@ def test_main_help_works_from_project_root(entry):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "--model_name" in result.stdout
-    assert "--input_path" in result.stdout
-    assert "--output_path" in result.stdout
+    assert "--model-name" in result.stdout
+    assert "--input-path" in result.stdout
+    assert "--output-path" in result.stdout
 
 
 def test_main_parser_preserves_defaults(monkeypatch):
@@ -35,12 +35,12 @@ def test_main_parser_preserves_defaults(monkeypatch):
 @pytest.mark.parametrize(
     ("entry", "option"),
     [
-        (["src/data_processing/downsample_LAZ.py"], "--source_path"),
-        (["-m", "src.data_processing.downsample_LAZ"], "--source_path"),
-        (["src/model_pipeline/TrainSegmAutomated.py"], "--model_name"),
-        (["-m", "src.model_pipeline.TrainSegmAutomated"], "--model_name"),
-        (["src/model_pipeline/EvalSegm_RandLANet.py"], "--model_name"),
-        (["-m", "src.model_pipeline.EvalSegm_RandLANet"], "--model_name"),
+        (["src/data_processing/downsample_laz.py"], "--source-path"),
+        (["-m", "src.data_processing.downsample_laz"], "--source-path"),
+        (["src/model_pipeline/train_segm_automated.py"], "--model-name"),
+        (["-m", "src.model_pipeline.train_segm_automated"], "--model-name"),
+        (["src/model_pipeline/eval_segm_randlanet.py"], "--model-name"),
+        (["-m", "src.model_pipeline.eval_segm_randlanet"], "--model-name"),
     ],
 )
 def test_workflow_help_works_in_both_invocation_forms(entry, option, tmp_path):

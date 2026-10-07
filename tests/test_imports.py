@@ -10,11 +10,11 @@ import pytest
     'module',
     [
         'array_processing',
-        'model_pipeline.TrainSegmAutomated',
-        'model_pipeline.EvalSegm_RandLANet',
+        'model_pipeline.train_segm_automated',
+        'model_pipeline.eval_segm_randlanet',
         'model_pipeline._train_single_case',
         'model_pipeline._data_loader',
-        'data_processing.downsample_LAZ',
+        'data_processing.downsample_laz',
     ],
 )
 def test_workflows_import_from_parent_with_their_own_utilities(module, tmp_path):
@@ -43,7 +43,7 @@ for name in ('load_json', 'load_model', 'compute_pos_weights_h5', 'FocalLoss', '
 
 @pytest.mark.parametrize(
     "module",
-    ["src.final_files.RandLANet_CB", "src.model_pipeline.RandLANet_CB"],
+    ["src.final_files.randlanet_cb", "src.model_pipeline.randlanet_cb"],
 )
 def test_model_import_does_not_require_torchinfo(module):
     code = """
@@ -99,7 +99,7 @@ def test_parent_project_main_imports_segmenter(arguments):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "--segm_model_name" in result.stdout
+    assert "--segm-model-name" in result.stdout
 
 
 def test_array_processing_runs_as_main_until_sample_input():
@@ -141,7 +141,7 @@ import importlib
 original_import = builtins.__import__
 
 def import_with_model_error(name, globals=None, locals=None, fromlist=(), level=0):
-    if name == "final_files.RandLANet_CB" and level == 1:
+    if name == "final_files.randlanet_cb" and level == 1:
         raise ImportError("model dependency failed")
     return original_import(name, globals, locals, fromlist, level)
 

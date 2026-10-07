@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from src.model_pipeline import EvalSegm_RandLANet as evaluation
+from src.model_pipeline import eval_segm_randlanet as evaluation
 
 
 def test_stratified_indices_are_exact_reproducible_and_keep_rare_classes():
@@ -147,7 +147,7 @@ def test_collect_samples_infers_unlabeled_cloud_without_writing_sample(
 
 def test_parser_exposes_raw_evaluation_contract(tmp_path):
     args = evaluation.parser([
-        "--model_name", "Network_2", "--raw_path", str(tmp_path)
+        "--model-name", "Network_2", "--raw-path", str(tmp_path)
     ])
     assert args.device == "cpu"
     assert args.mode == 0
@@ -156,12 +156,12 @@ def test_parser_exposes_raw_evaluation_contract(tmp_path):
 
     with pytest.raises(SystemExit):
         evaluation.parser([
-            "--model_name", "Network_2.pt", "--raw_path", str(tmp_path)
+            "--model-name", "Network_2.pt", "--raw-path", str(tmp_path)
         ])
     with pytest.raises(SystemExit):
         evaluation.parser([
-            "--model_name", "Network_2", "--raw_path", str(tmp_path),
-            "--max_points", "0",
+            "--model-name", "Network_2", "--raw-path", str(tmp_path),
+            "--max-points", "0",
         ])
 
 

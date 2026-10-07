@@ -111,7 +111,7 @@ class LocalFeatureAggregation(nn.Module):
         return self.relu(self.mlp2(x) + self.shortcut(features))
 
 
-class RandLANet(nn.Module):
+class Randlanet(nn.Module):
     def __init__(self, model_config: dict, n_classes: int):
         super().__init__()
 
@@ -264,7 +264,7 @@ def test_model():
 
     B, N, n_classes = 4, 8192, 10
     dummy = torch.randn(B, N, model_config['d_in']).cuda()
-    model = RandLANet(model_config, n_classes=n_classes).cuda()
+    model = Randlanet(model_config, n_classes=n_classes).cuda()
 
     out = model(dummy)
     expected = (B, n_classes, N)
@@ -274,5 +274,4 @@ def test_model():
 
 if __name__ == '__main__':
     test_model()
-
 

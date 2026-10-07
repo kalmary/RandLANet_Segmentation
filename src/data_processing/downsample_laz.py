@@ -300,7 +300,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--source_path',
+        '--source-path',
         type=str,
         help=(
             "Dir path with raw, labelled .LAZ files to process."
@@ -308,7 +308,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--decimated_path',
+        '--decimated-path',
         type=str,
         help=(
             "Checkpoint path with cut, distributed but non-converted files."
@@ -316,7 +316,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--converted_path',
+        '--converted-path',
         type=str,
         help=(
             "Final path with files meant for further computations with model pipeline."
@@ -324,7 +324,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--folder_split',
+        '--folder-split',
         type=Union[list[int], list[str]],
         default=[0.7, 0.2, 0.1],
         help=(
