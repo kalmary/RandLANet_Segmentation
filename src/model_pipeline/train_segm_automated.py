@@ -36,7 +36,7 @@ else:
 
 def check_models(model_configs_paths: list[pth.Path],
                  max_input_size = (1, 8192, 4),
-                 max_memory_GB = 20,
+                 max_memory_gb = 20,
                  verbose: bool = False) -> tuple[list[dict], list[pth.Path]]:
     """
     Check if models defined in NeuralNet/Architectures/models_1D/model_configs compile.
@@ -57,15 +57,15 @@ def check_models(model_configs_paths: list[pth.Path],
             model = Randlanet(model_config, 10)
             model.eval()
             model_summary = summary(model, input_size=max_input_size, verbose=0)
-            estimated_memory_GB = (model_summary.total_param_bytes + model_summary.total_output_bytes) / (1024 ** 3 )
+            estimated_memory_gb = (model_summary.total_param_bytes + model_summary.total_output_bytes) / (1024 ** 3 )
 
-            if estimated_memory_GB > max_memory_GB:
-                    raise MemoryError(f"Estimated memory {estimated_memory_GB:.2f} GB exceeds limit of {max_memory_GB:.2f} GB.")
+            if estimated_memory_gb > max_memory_gb:
+                    raise MemoryError(f"Estimated memory {estimated_memory_gb:.2f} GB exceeds limit of {max_memory_gb:.2f} GB.")
 
             del model, model_summary
 
             if verbose:
-                print(f"Model {model_config_path.name} compiled successfully\nEstimated memory: {estimated_memory_GB:.2f} GB.\n")
+                print(f"Model {model_config_path.name} compiled successfully\nEstimated memory: {estimated_memory_gb:.2f} GB.\n")
 
         except Exception as e:
             if verbose:
@@ -149,7 +149,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
         model_configs_paths_list = [p for p in model_configs_paths_list if "single" not in p.stem]
     
     training_config = convert_str_values(training_config)
-    model_configs_list, _ = check_models(model_configs_paths_list, max_memory_GB=32)
+    model_configs_list, _ = check_models(model_configs_paths_list, max_memory_gb=32)
     
     assert model_configs_list != 0, "No models compiled. Check model_configs - most likely too big models are defined"
 
@@ -642,7 +642,7 @@ def main():
 
         check_models(model_configs_paths=model_configs_paths_list, 
                      max_input_size=(1, 8192, 4), 
-                     max_memory_GB=20,
+                     max_memory_gb=20,
                      verbose=True)
 
         

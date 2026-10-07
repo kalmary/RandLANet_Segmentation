@@ -49,7 +49,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                       shuffle=True,
                                       device=device_loader)
 
-    trainLoader = DataLoader(train_dataset,
+    train_loader = DataLoader(train_dataset,
                              batch_size=None,
                              num_workers = 15,
                              pin_memory=True)
@@ -63,13 +63,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                     shuffle=False,
                                     device=device_loader)
 
-    valLoader = DataLoader(val_dataset,
+    val_loader = DataLoader(val_dataset,
                              batch_size=None,
                              num_workers = 15,
                              pin_memory=True)
     
-    total_t = get_dataset_len(trainLoader)
-    total_v = get_dataset_len(valLoader)
+    total_t = get_dataset_len(train_loader)
+    total_v = get_dataset_len(val_loader)
     class_weights_t = compute_pos_weights_h5(h5_path=training_dict['data_path_train'],
                                              num_classes=training_dict['num_classes'],
                                         power=0.25)
@@ -152,7 +152,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 epoch_miou_v = 0.
 
 
-                progressbar_t = tqdm(trainLoader, 
+                progressbar_t = tqdm(train_loader, 
                                         desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
                                         total=total_t, 
                                         position=3,
@@ -201,7 +201,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 acc_hist.append(-1.)  # Not computed for training
                 miou_hist.append(-1.)  # Not computed for training
 
-                progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
+                progressbar_v = tqdm(val_loader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
                 model.eval()
 
                 with torch.no_grad():

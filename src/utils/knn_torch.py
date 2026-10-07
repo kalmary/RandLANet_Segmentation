@@ -13,14 +13,14 @@ class KNNCache:
     def build(self, pcd): # batched knn for whole point cloud, gpu and cdist
         """Memory-efficient KNN using chunked processing"""
         self.pcd = pcd.contiguous()
-        _, N_tgt, _ = self.pcd.size()
+        _, n_tgt, _ = self.pcd.size()
 
         # Process in chunks to avoid large distance matrices
-        chunk_size = min(1024, N_tgt)  # Adjust based on available memory
+        chunk_size = min(1024, n_tgt)  # Adjust based on available memory
         all_dist = []
 
-        for i in range(0, N_tgt, chunk_size):
-            end_idx = min(i + chunk_size, N_tgt)
+        for i in range(0, n_tgt, chunk_size):
+            end_idx = min(i + chunk_size, n_tgt)
             tgt_chunk = self.pcd[:, i:end_idx]
 
             # Only compute distances for this chunk
@@ -36,16 +36,16 @@ class KNNCache:
         
         assert self.distances is not None or self.pcd is not None, "KNN not initialized"
 
-        N_tgt = len(tgt_idx)
+        n_tgt = len(tgt_idx)
         
         # For memory efficiency, process in chunks if needed
-        chunk_size = min(1024, N_tgt)
+        chunk_size = min(1024, n_tgt)
         
         all_dist = []
         all_idx = []
         
-        for i in range(0, N_tgt, chunk_size):
-            end_idx = min(i + chunk_size, N_tgt)
+        for i in range(0, n_tgt, chunk_size):
+            end_idx = min(i + chunk_size, n_tgt)
             tgt_chunk = tgt_idx[i:end_idx]
             
             # Extract only the needed distances for this chunk
