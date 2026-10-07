@@ -17,14 +17,11 @@ import numpy as np
 if __package__:
     from ..utils.pcd_manipulation import voxel_grid_fragmentation
     from ..utils.nn_utils import convert_str_values, load_json, save_to_json
-    from ..utils.scaler import LogScaler
 else:
     main_dir = pth.Path(__file__).parent.parent
     sys.path.insert(0, str(main_dir))
     from utils.pcd_manipulation import voxel_grid_fragmentation
     from utils.nn_utils import convert_str_values, load_json, save_to_json
-    from utils.scaler import LogScaler
-import open3d as o3d
 
 def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dict) -> None:
     if not work_dir.exists():

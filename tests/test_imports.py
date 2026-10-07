@@ -118,6 +118,31 @@ assert SegmentClass.__module__ == 'src.array_processing'
     assert result.returncode == 0, result.stderr
 
 
+def test_downsample_laz_import_does_not_require_open3d():
+    code = """
+import builtins
+
+original_import = builtins.__import__
+
+def import_without_open3d(name, *args, **kwargs):
+    if name.split('.', 1)[0] == 'open3d':
+        raise ImportError('open3d is not available')
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_open3d
+from src.data_processing import downsample_laz
+assert callable(downsample_laz.decimate_chunk_laz)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "arguments",
     [["src/main.py", "--help"], ["-m", "src.main", "--help"]],
