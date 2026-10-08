@@ -43,6 +43,38 @@ assert args.mode == 0
     assert result.returncode == 0, result.stderr
 
 
+def test_main_help_does_not_import_processing_dependencies():
+    code = """
+import importlib.abc
+import sys
+
+class BlockProcessingImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.', 1)[0] in {'laspy', 'torch'} or fullname == 'src.array_processing':
+            raise ImportError(f'Processing dependency imported: {fullname}')
+
+sys.meta_path.insert(0, BlockProcessingImports())
+sys.argv = ['main.py', '--help']
+from src.main import main
+
+try:
+    main()
+except SystemExit as error:
+    assert error.code == 0
+else:
+    raise AssertionError('--help did not exit')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--model-name" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("entry", "option"),
     [

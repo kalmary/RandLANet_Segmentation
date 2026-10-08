@@ -6,18 +6,35 @@ import shutil
 import sys
 from tqdm import tqdm
 
-import laspy
 import numpy as np
 
-import torch
+laspy = None
+torch = None
+SegmentClass = None
 
-if __package__:
-    from .array_processing import SegmentClass
-else:
-    from array_processing import SegmentClass
+
+def _load_processing_dependencies():
+    global laspy, torch, SegmentClass
+
+    if laspy is None:
+        import laspy as laspy_module
+
+        laspy = laspy_module
+    if torch is None:
+        import torch as torch_module
+
+        torch = torch_module
+    if SegmentClass is None:
+        if __package__:
+            from .array_processing import SegmentClass as segment_class
+        else:
+            from array_processing import SegmentClass as segment_class
+
+        SegmentClass = segment_class
 
 def iter_files(args_dict):
     """Iterates over files in a directory and processes them using the SegmentClass instance."""
+    _load_processing_dependencies()
     input_path = pth.Path(args_dict.get('input_path'))
     output_path_value = args_dict.get('output_path')
     output_path = pth.Path(output_path_value) if output_path_value else None
@@ -81,6 +98,7 @@ def iter_files(args_dict):
         laz.write(new_path)
 
 def run_test_mode(args_dict):
+    _load_processing_dependencies()
     device_name = args_dict.get('device')
     device = torch.device(
         'cuda'
@@ -265,8 +283,16 @@ def test_iter_files_processes_each_input_once(tmp_path, monkeypatch):
             assert intensity.tolist() == [7, 8]
             return np.array([2, 4], dtype=np.uint8)
 
-    monkeypatch.setattr(sys.modules[__name__], "SegmentClass", FakeSegmenter)
-    monkeypatch.setattr(laspy, "read", lambda path: FakeLas())
+    class FakeLaspy:
+        read = staticmethod(lambda path: FakeLas())
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "SegmentClass", FakeSegmenter)
+    monkeypatch.setattr(module, "laspy", FakeLaspy)
+    if module.torch is None:
+        import torch as torch_module
+
+        monkeypatch.setattr(module, "torch", torch_module)
 
     iter_files(
         {
