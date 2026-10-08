@@ -23,6 +23,9 @@ import importlib
 
 module = importlib.import_module('src.pcd_segmentation.src.{module}')
 utilities = importlib.import_module('src.pcd_segmentation.src.utils.nn_utils')
+dependency_loader = getattr(module, '_load_training_dependencies', None)
+if dependency_loader is not None:
+    dependency_loader()
 for name in ('load_json', 'load_model', 'compute_pos_weights_h5', 'FocalLoss', 'Plotter'):
     if name in vars(module):
         assert getattr(module, name) is getattr(utilities, name), name

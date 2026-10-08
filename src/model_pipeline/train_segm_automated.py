@@ -1,5 +1,4 @@
-import matplotlib
-matplotlib.use('Agg')
+from __future__ import annotations
 
 
 import pathlib as pth
@@ -14,24 +13,62 @@ import datetime
 import multiprocessing
 
 
-import torch
-import torch.nn as nn
-from torchinfo import summary
-import optuna
-
-from tqdm import tqdm
+_training_dependencies_loaded = False
 
 
-if __package__:
-    from ._train_single_case import train_model
-    from ..utils.nn_utils import Plotter, convert_str_values, load_json, save_model, save_to_json
-    from .randlanet_cb import Randlanet
-else:
-    src_dir = pth.Path(__file__).parent.parent
-    sys.path.append(str(src_dir))
-    from _train_single_case import train_model
-    from utils.nn_utils import Plotter, convert_str_values, load_json, save_model, save_to_json
-    from randlanet_cb import Randlanet
+def _load_training_dependencies():
+    global _training_dependencies_loaded
+    global Plotter, Randlanet, convert_str_values, load_json
+    global nn, optuna, save_model, save_to_json, summary, torch, tqdm, train_model
+
+    if _training_dependencies_loaded:
+        return
+
+    import matplotlib
+    import optuna as optuna_module
+    import torch as torch_module
+    import torch.nn as nn_module
+    from torchinfo import summary as model_summary
+    from tqdm import tqdm as progress_bar
+
+    matplotlib.use('Agg')
+
+    if __package__:
+        from ._train_single_case import train_model as train
+        from .randlanet_cb import Randlanet as randlanet
+        from ..utils.nn_utils import (
+            Plotter as plotter,
+            convert_str_values as convert_values,
+            load_json as load_config_file,
+            save_model as save_model_file,
+            save_to_json as save_config_file,
+        )
+    else:
+        src_dir = pth.Path(__file__).parent.parent
+        sys.path.append(str(src_dir))
+        from _train_single_case import train_model as train
+        from randlanet_cb import Randlanet as randlanet
+        from utils.nn_utils import (
+            Plotter as plotter,
+            convert_str_values as convert_values,
+            load_json as load_config_file,
+            save_model as save_model_file,
+            save_to_json as save_config_file,
+        )
+
+    torch = torch_module
+    nn = nn_module
+    optuna = optuna_module
+    summary = model_summary
+    tqdm = progress_bar
+    train_model = train
+    Randlanet = randlanet
+    Plotter = plotter
+    convert_str_values = convert_values
+    load_json = load_config_file
+    save_model = save_model_file
+    save_to_json = save_config_file
+    _training_dependencies_loaded = True
 
 
 def check_models(model_configs_paths: list[pth.Path],
@@ -43,6 +80,7 @@ def check_models(model_configs_paths: list[pth.Path],
     Print models not compiling.
     Return list of model configs that compile.
     """
+    _load_training_dependencies()
 
     # str paths to pth.Path if neccessary
     model_configs_paths = [pth.Path(config) for config in model_configs_paths]
@@ -118,6 +156,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
     2 - multiple trainings, with optuna
     
     """
+    _load_training_dependencies()
     logger = logging.getLogger(__name__)
     logger.info(f'START: case_based_training.')
 
@@ -178,6 +217,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
         return exp_configs
 
 def test_case(exp_config: dict) -> None:
+    _load_training_dependencies()
     
     logger = logging.getLogger(__name__)
     logger.info(f'START: test_case.')
@@ -207,6 +247,7 @@ class Checkpoint:
                          final_val: float,
                          exp_config: dict,
                          result_hist: dict) -> tuple[nn.Module, dict, pth.Path]:
+        _load_training_dependencies()
     
         
 
@@ -291,6 +332,7 @@ class Checkpoint:
 
 def case_based_training(exp_configs: list[dict],
                         model_name: str) -> None:
+    _load_training_dependencies()
     
     logger = logging.getLogger(__name__)
     logger.info(f'START: case_based_training.')
@@ -346,6 +388,7 @@ def objective_function(trial: optuna.Trial,
                        model_name: str,
                        model_configs_list: list[dict],
                        checkpoint: object) -> float:
+    _load_training_dependencies()
     
     """
     Objective function for Optuna
@@ -456,6 +499,7 @@ def objective_function(trial: optuna.Trial,
 def optuna_based_training(exp_config: list[dict], # only one, non converted conf given in list
                           model_name: str,
                           n_trials: int = 100) -> None:
+    _load_training_dependencies()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     logger = logging.getLogger(__name__)
@@ -594,6 +638,7 @@ def argparser():
 def main():
     multiprocessing.set_start_method('spawn', force=True)
     args = argparser()
+    _load_training_dependencies()
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
