@@ -1,29 +1,64 @@
 import argparse
 from typing import Union
 import pathlib as pth
-import h5py
 import shutil
-from tqdm import tqdm
 import sys
 
 import random
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+_preprocessing_dependencies_loaded = False
 
-import laspy
-import numpy as np
 
-if __package__:
-    from ..utils.pcd_manipulation import voxel_grid_fragmentation
-    from ..utils.nn_utils import convert_str_values, load_json, save_to_json
-else:
-    main_dir = pth.Path(__file__).parent.parent
-    sys.path.insert(0, str(main_dir))
-    from utils.pcd_manipulation import voxel_grid_fragmentation
-    from utils.nn_utils import convert_str_values, load_json, save_to_json
+def _load_preprocessing_dependencies():
+    global _preprocessing_dependencies_loaded
+    global MinMaxScaler, convert_str_values, h5py, laspy, load_json, np
+    global save_to_json, tqdm, train_test_split, voxel_grid_fragmentation
+
+    if _preprocessing_dependencies_loaded:
+        return
+
+    import h5py as h5py_module
+    import laspy as laspy_module
+    import numpy as numpy_module
+    from sklearn.model_selection import train_test_split as split_dataset
+    from sklearn.preprocessing import MinMaxScaler as min_max_scaler
+    from tqdm import tqdm as progress_bar
+
+    if __package__:
+        from ..utils.pcd_manipulation import (
+            voxel_grid_fragmentation as fragment_voxel_grid,
+        )
+        from ..utils.nn_utils import (
+            convert_str_values as convert_values,
+            load_json as load_config,
+            save_to_json as save_config,
+        )
+    else:
+        main_dir = pth.Path(__file__).parent.parent
+        sys.path.insert(0, str(main_dir))
+        from utils.pcd_manipulation import (
+            voxel_grid_fragmentation as fragment_voxel_grid,
+        )
+        from utils.nn_utils import (
+            convert_str_values as convert_values,
+            load_json as load_config,
+            save_to_json as save_config,
+        )
+
+    h5py = h5py_module
+    laspy = laspy_module
+    np = numpy_module
+    train_test_split = split_dataset
+    MinMaxScaler = min_max_scaler
+    tqdm = progress_bar
+    voxel_grid_fragmentation = fragment_voxel_grid
+    convert_str_values = convert_values
+    load_json = load_config
+    save_to_json = save_config
+    _preprocessing_dependencies_loaded = True
 
 def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dict) -> None:
+    _load_preprocessing_dependencies()
     if not work_dir.exists():
         raise ValueError('Incorrect path:', work_dir)
 
@@ -157,6 +192,7 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
 
 
 def convert_dataset(work_dir: pth.Path, goal_dir: pth.Path) -> tuple[pth.Path, pth.Path, pth.Path]:
+    _load_preprocessing_dependencies()
     work_train = work_dir.joinpath('train')
     work_test = work_dir.joinpath('test')
     work_val = work_dir.joinpath('val')
@@ -218,6 +254,7 @@ def convert_dataset(work_dir: pth.Path, goal_dir: pth.Path) -> tuple[pth.Path, p
 
 
 def rebalance_dataset(work_dir: pth.Path, folder_split: dict, tolerance=0.03):
+    _load_preprocessing_dependencies()
     work_train = work_dir.joinpath('train')
     work_test = work_dir.joinpath('test')
     work_val = work_dir.joinpath('val')
@@ -333,6 +370,7 @@ def argparser():
 
 
 def update_paths_config(path2train: pth.Path, path2test: pth.Path, path2val: pth.Path):
+    _load_preprocessing_dependencies()
 
 
     def _update_path(path2dataset: Union[str, pth.Path], dataset_name: str):
@@ -360,6 +398,7 @@ def update_paths_config(path2train: pth.Path, path2test: pth.Path, path2val: pth
 
 def main():
     parser = argparser()
+    _load_preprocessing_dependencies()
 
     source = parser.source_path
     source = pth.Path(source)

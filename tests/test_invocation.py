@@ -139,6 +139,38 @@ else:
     assert "--model-name" in result.stdout
 
 
+def test_preprocessing_help_does_not_import_processing_dependencies():
+    code = """
+import importlib.abc
+import sys
+
+class BlockProcessingImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.', 1)[0] in {'h5py', 'laspy', 'numpy', 'sklearn', 'torch'}:
+            raise ImportError(f'Processing dependency imported: {fullname}')
+
+sys.meta_path.insert(0, BlockProcessingImports())
+sys.argv = ['downsample_laz.py', '--help']
+from src.data_processing.downsample_laz import main
+
+try:
+    main()
+except SystemExit as error:
+    assert error.code == 0
+else:
+    raise AssertionError('--help did not exit')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--source-path" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("entry", "option"),
     [

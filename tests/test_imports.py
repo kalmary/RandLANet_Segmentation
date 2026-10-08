@@ -23,7 +23,11 @@ import importlib
 
 module = importlib.import_module('src.pcd_segmentation.src.{module}')
 utilities = importlib.import_module('src.pcd_segmentation.src.utils.nn_utils')
-for loader_name in ('_load_training_dependencies', '_load_processing_dependencies'):
+for loader_name in (
+    '_load_training_dependencies',
+    '_load_processing_dependencies',
+    '_load_preprocessing_dependencies',
+):
     dependency_loader = getattr(module, loader_name, None)
     if dependency_loader is not None:
         dependency_loader()
