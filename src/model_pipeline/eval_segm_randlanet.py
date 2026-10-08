@@ -1,22 +1,49 @@
+from __future__ import annotations
+
 import argparse
 import pathlib as pth
 import sys
 import tempfile
 from typing import Any, Sequence, TypedDict
 
-import laspy
 import numpy as np
-import torch
-from tqdm import tqdm
 
-if __package__:
-    from ..array_processing import SegmentClass
-    from ..utils.nn_utils import classification_report, compute_miou
-else:
-    src_dir = pth.Path(__file__).parent.parent
-    sys.path.append(str(src_dir))
-    from array_processing import SegmentClass
-    from utils.nn_utils import classification_report, compute_miou
+_processing_dependencies_loaded = False
+
+
+def _load_processing_dependencies():
+    global _processing_dependencies_loaded
+    global SegmentClass, classification_report, compute_miou, laspy, torch, tqdm
+
+    if _processing_dependencies_loaded:
+        return
+
+    import laspy as laspy_module
+    import torch as torch_module
+    from tqdm import tqdm as progress_bar
+
+    if __package__:
+        from ..array_processing import SegmentClass as segment_class
+        from ..utils.nn_utils import (
+            classification_report as write_classification_report,
+            compute_miou as calculate_miou,
+        )
+    else:
+        src_dir = pth.Path(__file__).parent.parent
+        sys.path.append(str(src_dir))
+        from array_processing import SegmentClass as segment_class
+        from utils.nn_utils import (
+            classification_report as write_classification_report,
+            compute_miou as calculate_miou,
+        )
+
+    laspy = laspy_module
+    torch = torch_module
+    tqdm = progress_bar
+    SegmentClass = segment_class
+    classification_report = write_classification_report
+    compute_miou = calculate_miou
+    _processing_dependencies_loaded = True
 
 
 class EvaluationMetrics(TypedDict):
@@ -83,6 +110,7 @@ def _cloud_files(raw_path: pth.Path) -> list[pth.Path]:
 
 
 def _device(name: str) -> torch.device:
+    _load_processing_dependencies()
     if name == 'cuda' and not torch.cuda.is_available():
         raise RuntimeError('CUDA was requested but is not available')
     return torch.device(name)
@@ -100,6 +128,7 @@ def _model_paths(model_name: str) -> ArtifactPaths:
 
 
 def _build_segmenter(model_name: str, paths: ArtifactPaths, device: torch.device) -> SegmentClass:
+    _load_processing_dependencies()
     return SegmentClass(voxel_size_big=100.0, overlap=0.4, scaled=True,
                         model_name=model_name, config_dir=paths['config_dir'],
                         model_dir=paths['model_dir'], device=device, verbose=True)
@@ -136,6 +165,7 @@ def _stratified_indices(targets: np.ndarray, max_points: int, rng: np.random.Gen
 
 
 def calculate_metrics(predictions: np.ndarray, targets: np.ndarray, num_classes: int) -> EvaluationMetrics:
+    _load_processing_dependencies()
     predictions = np.asarray(predictions).reshape(-1)
     targets = np.asarray(targets).reshape(-1)
     if predictions.shape != targets.shape:
@@ -154,6 +184,7 @@ def calculate_metrics(predictions: np.ndarray, targets: np.ndarray, num_classes:
 def collect_samples(segmenter: Any, files: list[pth.Path], max_points: int,
                     temp_dir: pth.Path, rng: np.random.Generator,
                     verbose: bool = True) -> CollectionSummary:
+    _load_processing_dependencies()
     sample_paths: list[pth.Path] = []
     labeled_files = sampled_points = 0
     iterator = tqdm(files, desc='Evaluating files', unit='file') if verbose else files
@@ -220,6 +251,7 @@ def run_evaluation(args: argparse.Namespace) -> EvaluationMetrics:
 
 def main() -> None:
     args = parser()
+    _load_processing_dependencies()
     run_dry_run(args) if args.mode == 0 else run_evaluation(args)
 
 

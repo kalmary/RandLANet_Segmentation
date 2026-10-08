@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from src.model_pipeline import eval_segm_randlanet as evaluation
+from . import eval_segm_randlanet as evaluation
+
+evaluation._load_processing_dependencies()
 
 
 def test_stratified_indices_are_exact_reproducible_and_keep_rare_classes():
