@@ -88,12 +88,20 @@ def test_segment_class_imports_from_parent_project_root():
 
 def test_segment_class_import_does_not_load_training_utilities():
     code = """
+import importlib.abc
 import sys
 
+class BlockOfflineImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.', 1)[0] in {'h5py', 'laspy'}:
+            raise ImportError(f'Offline dependency imported: {fullname}')
+
+sys.meta_path.insert(0, BlockOfflineImports())
 from src.array_processing import SegmentClass
 
 forbidden = {
     'h5py',
+    'laspy',
     'matplotlib',
     'optuna',
     'pyvista',

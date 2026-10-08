@@ -25,18 +25,17 @@ pytorch-windows-cuda = [
 [dependency-groups]
 basic = [
     "fpsample>=0.3,<2",
-    "h5py>=3.15,<4",
     "joblib>=1.5,<2",
-    "laspy>=2.6,<3",
-    "laszip>=0.2,<1",
-    "lazrs>=0.8,<1",
     "numpy>=1.26,<3",
     "scikit-learn>=1.7,<2",
-    "scipy>=1.16,<2",
     "tqdm>=4.67,<5",
 ]
 dev = [
     { include-group = "basic" },
+    "h5py>=3.15,<4",
+    "laspy>=2.6,<3",
+    "laszip>=0.2,<1",
+    "lazrs>=0.8,<1",
     "matplotlib>=3.10,<4",
     "optuna>=4.6,<5",
     "pytest>=9,<10",
