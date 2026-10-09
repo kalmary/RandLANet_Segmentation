@@ -175,7 +175,7 @@ def test_parent_project_main_imports_segmenter(arguments):
     assert "--segm-model-name" in result.stdout
 
 
-def test_array_processing_runs_as_main_until_sample_input():
+def test_array_processing_main_uses_explicit_input():
     code = """
 import laspy
 import runpy
@@ -184,8 +184,10 @@ from pathlib import Path
 
 script = Path("src/array_processing.py").resolve()
 sys.path.insert(0, str(script.parent))
+sys.argv = [str(script), "--input-path", "sample.laz"]
 
 def stop_before_sample_input(path):
+    assert path == Path("sample.laz")
     raise RuntimeError("sample input reached")
 
 laspy.read = stop_before_sample_input

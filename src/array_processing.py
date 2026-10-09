@@ -1,3 +1,4 @@
+import argparse
 import gc
 import os
 import pathlib as pth
@@ -350,15 +351,21 @@ class SegmentClass:
         return labels
 
         
-def run_segmentation_example():
-    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
-
-    import pathlib as pth
-
+def run_segmentation_example(
+    input_path: str | pth.Path,
+    model_name: str = "RandLANetV8_2",
+    config_dir: str | pth.Path | None = None,
+    device: str = "cpu",
+    plot: bool = False,
+    verbose: bool = True,
+):
     import laspy
 
-    path2laz = pth.Path(path2laz)
-    las = laspy.read(path2laz)
+    input_path = pth.Path(input_path)
+    if config_dir is None:
+        config_dir = pth.Path(__file__).resolve().parent / "final_files"
+
+    las = laspy.read(input_path)
     points = np.vstack((las.x, las.y, las.z)).transpose()
     intensity = np.asarray(las.intensity)
 
@@ -366,19 +373,67 @@ def run_segmentation_example():
         voxel_size_big=200.,
         overlap=0.4,
         scaled=True,
-        model_name="RandLANetV8_2",
-        config_dir="final_files",
-        device = torch.device('cuda'),
-        verbose = True)
+        model_name=model_name,
+        config_dir=config_dir,
+        device=torch.device(device),
+        verbose=verbose,
+    )
     
     labels = segmenter.segment_pcd(points=points,
-                          intensity=intensity)
-    
-    if __package__:
-        from .utils.plot_cloud import plot_cloud
-    else:
-        from utils.plot_cloud import plot_cloud
-    plot_cloud(points, labels)
+                                   intensity=intensity)
+
+    if plot:
+        if __package__:
+            from .utils.plot_cloud import plot_cloud
+        else:
+            from utils.plot_cloud import plot_cloud
+        plot_cloud(points, labels)
+
+    return labels
+
+
+def example_argparser(argv=None):
+    module_dir = pth.Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(
+        description="Run semantic segmentation on one LAZ file."
+    )
+    parser.add_argument("--input-path", type=pth.Path, required=True)
+    parser.add_argument("--model-name", default="RandLANetV8_2")
+    parser.add_argument(
+        "--config-dir",
+        type=pth.Path,
+        default=module_dir / "final_files",
+    )
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--plot",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = example_argparser(argv)
+    return run_segmentation_example(
+        input_path=args.input_path,
+        model_name=args.model_name,
+        config_dir=args.config_dir,
+        device=args.device,
+        plot=args.plot,
+        verbose=args.verbose,
+    )
+
+
+def test_example_parser_disables_plot_by_default(tmp_path):
+    args = example_argparser(["--input-path", str(tmp_path / "cloud.laz")])
+
+    assert args.plot is False
 
 
 def test_segment_pcd_empty_input_returns_empty_int32():
@@ -497,4 +552,4 @@ def test_load_config_normalizes_top_level_class_count(tmp_path, monkeypatch):
 
 
 if __name__ == '__main__':
-    run_segmentation_example()
+    main()

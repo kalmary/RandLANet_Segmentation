@@ -206,6 +206,8 @@ else:
 @pytest.mark.parametrize(
     ("entry", "option"),
     [
+        (["src/array_processing.py"], "--input-path"),
+        (["-m", "src.array_processing"], "--input-path"),
         (["src/data_processing/downsample_laz.py"], "--source-path"),
         (["-m", "src.data_processing.downsample_laz"], "--source-path"),
         (["src/model_pipeline/train_segm_automated.py"], "--model-name"),
