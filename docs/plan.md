@@ -58,7 +58,7 @@ ordering, and output labels.
   invocation path.
 - [ ] Ensure every current command parses arguments and `--help` before loading
   data, models, plotting, or CUDA state.
-- [ ] Preserve both direct-script and module execution from this project root.
+- [x] Preserve both direct-script and module execution from this project root.
 
 ## Task 4: Verify dependency ownership
 

@@ -1,13 +1,22 @@
+import argparse
+import importlib.util
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 
-if __package__ in {None, "", "model_pipeline"}:
+if __package__ == "model_pipeline":
     from utils.knn_torch import KnnCache
-else:
+elif __package__:
     from ..utils.knn_torch import KnnCache
+else:
+    knn_module_path = Path(__file__).resolve().parents[1] / "utils" / "knn_torch.py"
+    knn_module_spec = importlib.util.spec_from_file_location("knn_torch", knn_module_path)
+    knn_module = importlib.util.module_from_spec(knn_module_spec)
+    knn_module_spec.loader.exec_module(knn_module)
+    KnnCache = knn_module.KnnCache
 
 import json
-from pathlib import Path
 from typing import Union, Dict, Any, Optional
 
 
@@ -236,7 +245,7 @@ class Randlanet(nn.Module):
         return out
 
 
-def test_model():
+def test_model(device="cpu", batch_size=4, num_points=8192, n_classes=10):
     model_config = {
         "d_in": 4,
         "num_neighbors": 32,
@@ -257,15 +266,33 @@ def test_model():
         "fc_end":   {"layers": [32, 16], "dropout": 0.5}
     }
 
-    B, N, n_classes = 4, 8192, 10
-    dummy = torch.randn(B, N, model_config['d_in']).cuda()
-    model = Randlanet(model_config, n_classes=n_classes).cuda()
+    dummy = torch.randn(batch_size, num_points, model_config['d_in'], device=device)
+    model = Randlanet(model_config, n_classes=n_classes).to(device)
 
     out = model(dummy)
-    expected = (B, n_classes, N)
+    expected = (batch_size, n_classes, num_points)
     assert out.shape == expected, f"Expected {expected}, got {out.shape}"
     print(f"Success! Output: {out.shape}")
 
 
+def argparser(argv=None):
+    parser = argparse.ArgumentParser(description="Run a RandLANet model smoke test.")
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--num-points", type=int, default=8192)
+    parser.add_argument("--n-classes", type=int, default=10)
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = argparser(argv)
+    test_model(
+        device=args.device,
+        batch_size=args.batch_size,
+        num_points=args.num_points,
+        n_classes=args.n_classes,
+    )
+
+
 if __name__ == '__main__':
-    test_model()
+    main()
