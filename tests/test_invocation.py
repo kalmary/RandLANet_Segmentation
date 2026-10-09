@@ -212,6 +212,8 @@ else:
         (["-m", "src.model_pipeline.train_segm_automated"], "--model-name"),
         (["src/model_pipeline/eval_segm_randlanet.py"], "--model-name"),
         (["-m", "src.model_pipeline.eval_segm_randlanet"], "--model-name"),
+        (["src/utils/plot_laz.py"], "--input-path"),
+        (["-m", "src.utils.plot_laz"], "--input-path"),
     ],
 )
 def test_workflow_help_works_in_both_invocation_forms(entry, option, tmp_path):
@@ -224,6 +226,7 @@ def test_workflow_help_works_in_both_invocation_forms(entry, option, tmp_path):
         capture_output=True,
         text=True,
         env=env,
+        timeout=60,
     )
 
     assert result.returncode == 0, result.stderr
