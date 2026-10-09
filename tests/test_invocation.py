@@ -1,3 +1,4 @@
+import ast
 import subprocess
 import sys
 import os
@@ -6,11 +7,42 @@ from pathlib import Path
 import pytest
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INVOCATION_MANIFEST = {
+    "src/array_processing.py": "developer",
+    "src/data_processing/downsample_laz.py": "operational",
+    "src/final_files/randlanet_cb.py": "developer",
+    "src/main.py": "operational",
+    "src/model_pipeline/_data_loader.py": "developer",
+    "src/model_pipeline/eval_segm_randlanet.py": "operational",
+    "src/model_pipeline/randlanet_cb.py": "developer",
+    "src/model_pipeline/test_specific_model.py": "diagnostic",
+    "src/model_pipeline/train_segm_automated.py": "operational",
+    "src/utils/plot_laz.py": "diagnostic",
+}
+
+
+def test_invocation_manifest_covers_every_main_guard():
+    guarded_files = set()
+    for path in (PROJECT_ROOT / "src").rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        if any(
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "__name__"
+            for node in ast.walk(tree)
+        ):
+            guarded_files.add(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert guarded_files == set(INVOCATION_MANIFEST)
+
+
 @pytest.mark.parametrize("entry", [["src/main.py"], ["-m", "src.main"]])
 def test_main_help_works_from_project_root(entry):
     result = subprocess.run(
         [sys.executable, *entry, "--help"],
-        cwd=Path(__file__).resolve().parents[1],
+        cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
     )

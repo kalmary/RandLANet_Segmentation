@@ -31,7 +31,7 @@ ordering, and output labels.
 
 - [ ] Protect `SegmentClass` construction and `segment_pcd` behavior with the
   remaining deterministic characterization cases.
-- [ ] Inventory every `__main__` guard without removing any executable.
+- [x] Inventory every `__main__` guard without removing any executable.
 - [ ] Add blocked-import tests proving which unrelated preparation, training,
   evaluation, plotting, HDF5, Open3D, Optuna, and Torchinfo modules currently
   load during inference.
