@@ -1,68 +1,77 @@
-# PCDSegmentation Rebuild Plan
+# Semantic Segmentation Import Repair Plan
 
-**Goal:** Incrementally rebuild semantic point-cloud segmentation, training, evaluation, and preprocessing around the existing RandLANet implementation while preserving `SegmentClass` and all documented script workflows.
+**Goal:** Separate inference imports from standalone preparation, training,
+evaluation, and plotting imports while preserving the existing RandLANet
+implementation and every supported command.
 
-**Root-facing contract:** `SegmentClass(...).segment_pcd(points, intensity)` returns one point-aligned label array.
+**Root-facing contract:** `SegmentClass(...).segment_pcd(points, intensity)`
+retains its current validation, chunking, scaling, device behavior, point
+ordering, and output labels.
 
-**Design:** `../../../docs/rebuild.md`
+**Parent plan:** `../../../docs/plan.md`
 
-**Branch requirement:** Perform all rebuild work in this repository and its nested `nn_utils` submodule on `development`. Verify both branches first and request explicit approval before creating or switching either one.
+## Frozen behavior
 
-## Task 1: Establish the uv project
+- Do not split, rewrite, optimize, or retune semantic segmentation,
+  voxel/chunk construction, overlap merging, scaling, or model prediction.
+- Do not change model/config lookup conventions, CLI options, JSON schemas,
+  dataset formats, output naming, or training/evaluation results.
+- Preserve the nested `nn_utils` revision and API unless a separately approved
+  canonical update is synchronized into every checkout.
 
-**Files:** create `.python-version`, `pyproject.toml`, `uv.lock`; update `.gitignore` and README installation commands.
+## Completed foundation
 
-- [x] Replace the legacy requirements files as sources of truth with minimal direct dependencies.
-- [x] Define `basic` for inference/headless preprocessing and `dev` including `basic`, `pytest`, `matplotlib`, and `pyvista`.
-- [x] Keep plotting imports out of normal inference unless a plotting operation is explicitly requested.
-- [x] Configure PyTorch 2.14/Torchvision 0.29 CPU and CUDA 13.2 profiles without pinning NVIDIA transitive wheels.
-- [x] Preserve and verify the nested `nn_utils` submodule/package relationship.
-- [x] Verify clean basic/dev syncs and current public imports.
+- [x] Establish the Python 3.12 uv project and dependency groups.
+- [x] Configure supported PyTorch profiles and preserve the nested `nn_utils`.
+- [x] Test imports from the standalone project and parent BRIK repository.
+- [x] Test direct/module help for existing preprocessing, inference, training,
+  and evaluation commands.
 
-## Task 2: Protect interfaces and invocations
+## Task 1: Complete import characterization
 
-**Files:** add unit tests beside owned functions; create `tests/test_invocation.py` and integration tests under `tests/`.
+- [ ] Protect `SegmentClass` construction and `segment_pcd` behavior with the
+  remaining deterministic characterization cases.
+- [ ] Inventory every `__main__` guard without removing any executable.
+- [ ] Add blocked-import tests proving which unrelated preparation, training,
+  evaluation, plotting, HDF5, Open3D, Optuna, and Torchinfo modules currently
+  load during inference.
+- [ ] Assert every `--help` path avoids datasets, weights, CUDA initialization,
+  output creation, and plotting backends.
 
-- [ ] Characterize `SegmentClass` construction, model/config lookup, input validation, chunking/overlap, scaling, device use, and output ordering.
-- [ ] Test empty and malformed point/intensity arrays, missing artifacts, provider errors, and deterministic small inference doubles.
-- [ ] Pin CLI flags/defaults and file discovery/output behavior in `src/main.py` and preprocessing scripts.
-- [x] Test imports from the submodule root and the parent BRIK root.
-- [x] Test direct and module forms for preprocessing, inference, training, and evaluation help modes.
+## Task 2: Repair inference imports
 
-## Task 3: Normalize package imports
+- [ ] Replace `sys.path` mutation, generic `utils` imports, and wildcard imports
+  with explicit imports from the defining packages/modules.
+- [ ] Import only the `nn_utils`, model, scaler, cache, and point-processing
+  names actually used by inference.
+- [ ] Resolve configs and weights through explicit or stable project-relative
+  paths without changing existing basename conventions.
+- [ ] Keep `src/array_processing.py` and `src/main.py` as compatible public
+  locations; do not alter the algorithmic bodies they expose.
 
-**Files:** current modules under `src/`; new internal package modules only where a tested responsibility is extracted.
+## Task 3: Repair standalone workflow imports
 
-- [ ] Replace `sys.path` mutation and generic `from utils` imports with package-relative imports.
-- [ ] Keep existing script files as compatibility wrappers so documented direct execution still works.
-- [ ] Replace wildcard imports with explicit consumed names.
-- [ ] Resolve configs, weights, datasets, and result paths from explicit arguments or stable module-relative roots.
-- [ ] Verify every invocation form after each import change.
+- [ ] Keep LAZ/HDF5 preparation dependencies local to preparation commands.
+- [ ] Keep training, Optuna, Torchinfo, metrics, reporting, and plotting imports
+  local to training/evaluation commands.
+- [ ] Remove only confirmed unused imports in a file when repairing that file's
+  invocation path.
+- [ ] Ensure every current command parses arguments and `--help` before loading
+  data, models, plotting, or CUDA state.
+- [ ] Preserve both direct-script and module execution from this project root.
 
-## Task 4: Separate inference responsibilities
+## Task 4: Verify dependency ownership
 
-- [ ] Extract model artifact/config loading behind the existing `SegmentClass` constructor contract.
-- [ ] Separate voxel partitioning, scaling, model prediction, and result merging one tested step at a time.
-- [ ] Keep array shapes, overlap semantics, stable ordering, and labels unchanged.
-- [ ] Make CPU/CUDA device placement explicit and prevent mixed-device tensors.
-- [ ] Retain `src/array_processing.py` as the root-compatible import layer.
+- [ ] Run inference import and deterministic CPU behavior tests under `basic`
+  with the selected PyTorch extra.
+- [ ] Run all standalone tool invocation tests and the full suite under `dev`.
+- [ ] Verify parent-root import and root semantic stage behavior.
+- [ ] Run production-weight CUDA verification separately on supported Linux
+  hardware.
+- [ ] Change dependency groups only after these workflow checks pass.
 
-## Task 5: Separate offline workflows
+## Completion gate
 
-- [ ] Isolate LAZ preprocessing and HDF5 dataset creation from inference imports.
-- [ ] Isolate training configuration, Optuna orchestration, one-run training, and reporting.
-- [ ] Isolate evaluation loading, metrics, and output plotting.
-- [ ] Preserve current JSON schemas, CLI arguments, output naming, and result directories.
-- [ ] Ensure plotting dependencies are loaded only by plotting/reporting paths.
-
-## Task 6: Verify
-
-- [ ] Run focused unit tests after each extraction and the complete suite at each task gate.
-- [ ] Run direct/module invocation tests from documented working directories.
-- [ ] Run a deterministic CPU inference smoke test using a small fixture.
-- [ ] Run a production-weight CUDA smoke test on supported Linux hardware and record the effective device.
-- [ ] Run the root BRIK pipeline test with a `SegmentClass` instance or faithful double.
-
-## Completion Gate
-
-The uv environments reproduce independently; `SegmentClass` remains compatible; preprocessing, training, evaluation, and inference commands work in both supported invocation forms; CPU tests and Linux CUDA smoke tests pass.
+Inference imports no offline or visualization workflows, every current tool
+works independently in both declared forms, and `SegmentClass.segment_pcd`
+produces unchanged results.
