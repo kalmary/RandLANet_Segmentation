@@ -1,11 +1,10 @@
 import argparse
 import pathlib as pth
+import random
 import runpy
 import shutil
 import sys
-from typing import Union
-
-import random
+from collections.abc import Sequence
 
 _preprocessing_dependencies_loaded = False
 
@@ -102,7 +101,13 @@ def decimate_chunk_laz(work_dir: pth.Path, goal_dir: pth.Path, folder_split: dic
                     print(e)
                     continue
 
-                points = np.vstack((las.x, las.y, las.z)).transpose()
+                points = np.vstack(
+                    (
+                        np.asarray(las.x),
+                        np.asarray(las.y),
+                        np.asarray(las.z),
+                    )
+                ).transpose()
                 points = points.astype(np.float32, copy=False)
 
                 points = points - np.mean(points, axis =0)
@@ -198,40 +203,39 @@ def convert_dataset(work_dir: pth.Path, goal_dir: pth.Path) -> tuple[pth.Path, p
     test_paths = list(work_test.rglob('*.npy'))
     validation_paths = list(work_val.rglob('*.npy'))
 
-    def convert2_h5(path_list: list[Union[str, pth.Path]], mode: int):
-        available_modes = {0: 'train', 1: 'test', 2: 'val'}
-        if mode not in [0, 1, 2]:
+    def convert2_h5(path_list: Sequence[str | pth.Path], mode: int):
+        available_modes = {
+            0: 'train.h5',
+            1: 'test.h5',
+            2: 'validation.h5',
+        }
+        if mode not in available_modes:
             raise ValueError(f'Incorrect mode: {mode}\nAvailable modes: {available_modes}')
-        
-        match mode:
-            case 0:
-                goal_file = goal_dir.joinpath('train.h5')
-                h5_file = h5py.File(goal_file, 'w')
-            case 1:
-                goal_file = goal_dir.joinpath('test.h5')
-                h5_file = h5py.File(goal_file, 'w')
-            case 2:
-                goal_file = goal_dir.joinpath('validation.h5')
-                h5_file = h5py.File(goal_file, 'w')
+
+        goal_file = goal_dir.joinpath(available_modes[mode])
+        source_dir = pth.Path(path_list[0]).parent if path_list else work_dir
         
         chunk2save = np.zeros((0, chunk_num_point, 5), dtype=np.float32)
         chunk_num = 0
 
-        for path in tqdm(path_list, desc=f'Training folder, copying data {pth.Path(path_list[0]).parent} ---> {goal_file.name}',
-                        total=len(path_list)):
-            points = np.load(path)
-            points = np.expand_dims(points, axis=0)
+        with h5py.File(goal_file, 'w') as h5_file:
+            for path in tqdm(
+                path_list,
+                desc=f'Training folder, copying data {source_dir} ---> {goal_file.name}',
+                total=len(path_list),
+            ):
+                points = np.load(path)
+                points = np.expand_dims(points, axis=0)
 
 
-            chunk2save = np.concatenate([chunk2save, points], axis=0)
-            if chunk2save.shape[0] >= chunk_h5_shape:
+                chunk2save = np.concatenate([chunk2save, points], axis=0)
+                if chunk2save.shape[0] >= chunk_h5_shape:
+                    h5_file.create_dataset(str(chunk_num), data=chunk2save)
+                    chunk2save = np.zeros((0, chunk_num_point, 5), dtype=np.float32)
+                    chunk_num += 1
+
+            if chunk2save.shape[0] > 0:
                 h5_file.create_dataset(str(chunk_num), data=chunk2save)
-                chunk2save = np.zeros((0, chunk_num_point, 5), dtype=np.float32)
-                chunk_num += 1
-
-        if chunk2save.shape[0] > 0:
-            h5_file.create_dataset(str(chunk_num), data=chunk2save)
-        h5_file.close()
 
     convert2_h5(train_paths, 0)
     convert2_h5(test_paths, 1)
@@ -283,7 +287,7 @@ def rebalance_dataset(work_dir: pth.Path, folder_split: dict, tolerance=0.03):
 
     for s in surplus:
         files = list(work_pths[s].rglob('*.npy'))
-        np.random.shuffle(files)
+        np.random.shuffle(files)  # pyright: ignore[reportArgumentType]
         for d in deficit:
             move_n = min(diffs[s], -diffs[d])
             if move_n <= 0:
@@ -308,7 +312,7 @@ def rebalance_dataset(work_dir: pth.Path, folder_split: dict, tolerance=0.03):
     print(f"File counts after balancing: train={new_counts[0]}, test={new_counts[1]}, val={new_counts[2]}")
     print("Move summary:", move_log)
 
-def argparser():
+def argparser(argv=None):
         
     """
     Parse command-line arguments for automated point cloud data processing for semantic segmentation.
@@ -348,26 +352,27 @@ def argparser():
 
     parser.add_argument(
         '--folder-split',
-        type=Union[list[int], list[str]],
+        type=float,
+        nargs=3,
         default=[0.7, 0.2, 0.1],
         help=(
             "Folder split ratios for train, test, validation."
         )
     )
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def update_paths_config(path2train: pth.Path, path2test: pth.Path, path2val: pth.Path):
     _load_preprocessing_dependencies()
 
 
-    def _update_path(path2dataset: Union[str, pth.Path], dataset_name: str):
+    def _update_path(path2dataset: str | pth.Path, dataset_name: str):
 
         config_dir = pth.Path(__file__).parent.parent.joinpath('model_pipeline/training_configs')
         
-        path2config_single = config_dir.joinpath(f'config_train_single.json')
-        path2config = config_dir.joinpath(f'config_train.json')
+        path2config_single = config_dir.joinpath('config_train_single.json')
+        path2config = config_dir.joinpath('config_train.json')
 
         config_single = load_json(path2config_single)
         config = load_json(path2config)
@@ -381,6 +386,38 @@ def update_paths_config(path2train: pth.Path, path2test: pth.Path, path2val: pth
     _update_path(path2train, 'data_path_train')
     _update_path(path2test, 'data_path_test')
     _update_path(path2val, 'data_path_val')
+
+
+def test_argparser_parses_explicit_folder_split():
+    args = argparser(
+        [
+            '--folder-split',
+            '0.6',
+            '0.25',
+            '0.15',
+        ]
+    )
+
+    assert args.folder_split == [0.6, 0.25, 0.15]
+
+
+def test_convert_dataset_creates_empty_split_files(tmp_path):
+    work_dir = tmp_path / 'work'
+    goal_dir = tmp_path / 'converted'
+    for split in ('train', 'test', 'val'):
+        work_dir.joinpath(split).mkdir(parents=True)
+    goal_dir.mkdir()
+
+    output_paths = convert_dataset(work_dir, goal_dir)
+
+    assert output_paths == (
+        goal_dir / 'train.h5',
+        goal_dir / 'test.h5',
+        goal_dir / 'validation.h5',
+    )
+    for output_path in output_paths:
+        with h5py.File(output_path, 'r') as output_file:
+            assert list(output_file.keys()) == []
 
 
 

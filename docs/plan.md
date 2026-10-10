@@ -66,6 +66,8 @@ ordering, and output labels.
   with the selected PyTorch extra.
 - [x] Run all standalone tool invocation tests and the full suite under `dev`.
 - [x] Verify parent-root import and root semantic stage behavior.
+- [x] Run Pyright for LAZ preprocessing and repair its CLI and HDF5 boundary
+  without changing sampling or label transformations.
 - [ ] Run production-weight CUDA verification separately on supported Linux
   hardware.
 - [ ] Change dependency groups only after these workflow checks pass.
