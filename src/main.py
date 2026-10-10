@@ -1,12 +1,10 @@
-from typing import Optional, Union
-import pathlib as pth
 import argparse
-import logging
+import pathlib as pth
 import shutil
 import sys
-from tqdm import tqdm
 
 import numpy as np
+from tqdm import tqdm
 
 laspy = None
 torch = None

@@ -20,6 +20,7 @@ if __package__:
     from .utils.nn_utils import load_json, load_model
 else:
     from final_files.randlanet_cb import Randlanet
+
     from utils import pcd_manipulation
     from utils.nn_utils import load_json, load_model
 
