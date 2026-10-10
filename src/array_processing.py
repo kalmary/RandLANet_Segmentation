@@ -1,17 +1,20 @@
+# pyright: reportImplicitRelativeImport=false
+
 import argparse
 import gc
 import os
 import pathlib as pth
 import sys
 from multiprocessing import shared_memory
-from typing import Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
 from joblib import Parallel, delayed
+from numpy.typing import NDArray
 from sklearn.neighbors import KDTree
 from sklearn.preprocessing import MinMaxScaler
+from torch import nn
 
 if __package__:
     from .final_files.randlanet_cb import Randlanet
@@ -22,18 +25,22 @@ else:
     from utils import pcd_manipulation
     from utils.nn_utils import load_json, load_model
 
+
+DEFAULT_DEVICE = torch.device("cpu")
+
+
 class SegmentClass:
     def __init__(self,
                  voxel_size_big: float = 200.,
                  overlap: float = 0.4,
                  scaled: bool = False,
-                 model_name: str = None,
-                 config_dir: Union[str, pth.Path] = "final_files",
-                 model_dir: Optional[Union[str, pth.Path]] = None,
-                 device: torch.device = torch.device('cpu'),
+                 model_name: str | None = None,
+                 config_dir: str | pth.Path = "final_files",
+                 model_dir: str | pth.Path | None = None,
+                 device: str | torch.device = DEFAULT_DEVICE,
                  verbose: bool = False):
         
-        self.voxel_size_small = None
+        self.voxel_size_small: float
         self.voxel_size_big = voxel_size_big
         self.overlap = overlap
         self.scaled = scaled
@@ -41,9 +48,7 @@ class SegmentClass:
             raise ValueError("model_name cannot be None")
         self.model_name = model_name + '.pt'
 
-        if isinstance(device, str):
-            self.device = torch.device(device)
-        self.device = device
+        self.device = torch.device(device) if isinstance(device, str) else device
 
         self.verbose = verbose
 
@@ -61,19 +66,19 @@ class SegmentClass:
             model_dir = pth.Path(model_dir)
             if not model_dir.is_absolute():
                 model_dir = self.base_path / model_dir
-        self._config = None
-        self._model_config = None
+        self._config: dict[str, Any]
+        self._model_config: dict[str, Any]
         self._load_config(config_dir)
         self._model = self._load_segm_model(model_dir)
 
 
     # TODO adjust model loading 
-    def _load_config(self, config_dir: Optional[Union[pth.Path, str]] = None) -> dict:
+    def _load_config(self, config_dir: pth.Path | str) -> dict[str, Any]:
 
         config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
         config_dict = load_json(config_path)
         self._config = config_dict
-        self._model_config: dict = config_dict['model_config']
+        self._model_config = config_dict['model_config']
         top_level_classes = int(config_dict['num_classes'])
         nested_classes = self._model_config.get('num_classes')
         if nested_classes is not None and int(nested_classes) != top_level_classes:
@@ -81,11 +86,11 @@ class SegmentClass:
                 'num_classes differs between the top-level and model configuration'
             )
         self._model_config['num_classes'] = top_level_classes
-        self.voxel_size_small: float = self._model_config['max_voxel_dim']
+        self.voxel_size_small = self._model_config['max_voxel_dim']
 
         return config_dict
 
-    def _load_segm_model(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
+    def _load_segm_model(self, model_dir: pth.Path | str = "./final_files") -> nn.Module:
 
         path2model = pth.Path(model_dir).joinpath(self.model_name)
         model = Randlanet(self._config["model_config"], self._config['num_classes'])
@@ -98,16 +103,16 @@ class SegmentClass:
 
         return self._model
     
-    def _init_scaler(self, feature_range: Tuple[int] = (0, 10)) -> MinMaxScaler:
+    def _init_scaler(self, feature_range: tuple[int, int] = (0, 10)) -> MinMaxScaler:
         self._scaler = MinMaxScaler(feature_range)
         return self._scaler
     
     @property
-    def model_config(self) -> dict:
+    def model_config(self) -> dict[str, Any]:
         return self._model_config
 
     @property
-    def config(self) -> dict:
+    def config(self) -> dict[str, Any]:
         return self._config
 
     @property
@@ -119,7 +124,7 @@ class SegmentClass:
         return self._model
     
     @property
-    def scaler(self) -> MinMaxScaler:
+    def scaler(self) -> MinMaxScaler | None:
         return self._scaler
     
     @staticmethod
@@ -165,7 +170,8 @@ class SegmentClass:
         if voxel_all.shape[0] == 0:
             return np.zeros(points.shape[0], dtype=np.int32)
 
-        n_workers = os.cpu_count() if num_workers <= 0 else min(num_workers, os.cpu_count())
+        available_workers = os.cpu_count() or 1
+        n_workers = available_workers if num_workers <= 0 else min(num_workers, available_workers)
         k_neighbors_upsampling = min(k_neighbors_upsampling, voxel_all.shape[0])
 
         def make_shm(arr):
@@ -209,13 +215,16 @@ class SegmentClass:
                 except FileNotFoundError:
                     pass
     
-    def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
+    def _model_predict(
+        self,
+        voxel: NDArray[np.number[Any]],
+    ) -> NDArray[np.float32]:
 
 
-        voxel = torch.from_numpy(voxel).float().to(self.device)
-        voxel = voxel.unsqueeze(dim = 0)
+        voxel_tensor = torch.from_numpy(voxel).float().to(self.device)
+        voxel_tensor = voxel_tensor.unsqueeze(dim = 0)
         with torch.no_grad():
-            voxel_probs = self._model(voxel)
+            voxel_probs = self._model(voxel_tensor)
         voxel_probs = voxel_probs.permute(0, 2, 1).squeeze(dim = 0).cpu().numpy()
 
         return voxel_probs
@@ -327,7 +336,7 @@ class SegmentClass:
 
         return labels
 
-    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 7e6) -> np.ndarray:
+    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 7_000_000) -> np.ndarray:
         if points.shape[0] == 0:
             return np.zeros(0, dtype=np.int32)
         if points.shape[0] != intensity.shape[0]:
@@ -336,6 +345,7 @@ class SegmentClass:
             )
 
         if self.scaled: # TODO enable it if necessary
+            assert self._scaler is not None
             intensity = self._scaler.fit_transform(intensity.reshape(-1, 1))
         intensity = intensity.flatten()
 
@@ -366,7 +376,9 @@ def run_segmentation_example(
         config_dir = pth.Path(__file__).resolve().parent / "final_files"
 
     las = laspy.read(input_path)
-    points = np.vstack((las.x, las.y, las.z)).transpose()
+    points = np.column_stack(
+        (np.asarray(las.x), np.asarray(las.y), np.asarray(las.z))
+    )
     intensity = np.asarray(las.intensity)
 
     segmenter = SegmentClass(
@@ -529,6 +541,7 @@ def test_segment_class_accepts_separate_config_and_model_directories(
     assert calls == [("config", config_dir), ("model", model_dir)]
     assert segmenter.config["num_classes"] == 4
     assert segmenter.n_classes == 4
+    assert segmenter.device == torch.device("cpu")
 
     calls.clear()
     SegmentClass(model_name="network_1", config_dir=config_dir)
