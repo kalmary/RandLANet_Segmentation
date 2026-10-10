@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib as pth
+import runpy
 import sys
 import tempfile
 from typing import Any, Sequence, TypedDict
@@ -22,20 +23,11 @@ def _load_processing_dependencies():
     import torch as torch_module
     from tqdm import tqdm as progress_bar
 
-    if __package__:
-        from ..array_processing import SegmentClass as segment_class
-        from ..utils.nn_utils import (
-            classification_report as write_classification_report,
-            compute_miou as calculate_miou,
-        )
-    else:
-        src_dir = pth.Path(__file__).parent.parent
-        sys.path.append(str(src_dir))
-        from array_processing import SegmentClass as segment_class
-        from utils.nn_utils import (
-            classification_report as write_classification_report,
-            compute_miou as calculate_miou,
-        )
+    from ..array_processing import SegmentClass as segment_class
+    from ..utils.nn_utils import (
+        classification_report as write_classification_report,
+        compute_miou as calculate_miou,
+    )
 
     laspy = laspy_module
     torch = torch_module
@@ -255,5 +247,17 @@ def main() -> None:
     run_dry_run(args) if args.mode == 0 else run_evaluation(args)
 
 
+def _run_direct_entry_point() -> None:
+    project_root = str(pth.Path(__file__).resolve().parents[2])
+    sys.path.insert(0, project_root)
+    try:
+        runpy.run_module("src.model_pipeline.eval_segm_randlanet", run_name="__main__")
+    finally:
+        sys.path.remove(project_root)
+
+
 if __name__ == '__main__':
-    main()
+    if __package__:
+        main()
+    else:
+        _run_direct_entry_point()

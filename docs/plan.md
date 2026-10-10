@@ -29,34 +29,34 @@ ordering, and output labels.
 
 ## Task 1: Complete import characterization
 
-- [ ] Protect `SegmentClass` construction and `segment_pcd` behavior with the
+- [x] Protect `SegmentClass` construction and `segment_pcd` behavior with the
   remaining deterministic characterization cases.
 - [x] Inventory every `__main__` guard without removing any executable.
-- [ ] Add blocked-import tests proving which unrelated preparation, training,
+- [x] Add blocked-import tests proving which unrelated preparation, training,
   evaluation, plotting, HDF5, Open3D, Optuna, and Torchinfo modules currently
   load during inference.
-- [ ] Assert every `--help` path avoids datasets, weights, CUDA initialization,
+- [x] Assert every `--help` path avoids datasets, weights, CUDA initialization,
   output creation, and plotting backends.
 
 ## Task 2: Repair inference imports
 
-- [ ] Replace `sys.path` mutation, generic `utils` imports, and wildcard imports
+- [x] Replace `sys.path` mutation, generic `utils` imports, and wildcard imports
   with explicit imports from the defining packages/modules.
-- [ ] Import only the `nn_utils`, model, scaler, cache, and point-processing
+- [x] Import only the `nn_utils`, model, scaler, cache, and point-processing
   names actually used by inference.
-- [ ] Resolve configs and weights through explicit or stable project-relative
+- [x] Resolve configs and weights through explicit or stable project-relative
   paths without changing existing basename conventions.
-- [ ] Keep `src/array_processing.py` and `src/main.py` as compatible public
+- [x] Keep `src/array_processing.py` and `src/main.py` as compatible public
   locations; do not alter the algorithmic bodies they expose.
 
 ## Task 3: Repair standalone workflow imports
 
-- [ ] Keep LAZ/HDF5 preparation dependencies local to preparation commands.
-- [ ] Keep training, Optuna, Torchinfo, metrics, reporting, and plotting imports
+- [x] Keep LAZ/HDF5 preparation dependencies local to preparation commands.
+- [x] Keep training, Optuna, Torchinfo, metrics, reporting, and plotting imports
   local to training/evaluation commands.
-- [ ] Remove only confirmed unused imports in a file when repairing that file's
+- [x] Remove only confirmed unused imports in a file when repairing that file's
   invocation path.
-- [ ] Ensure every current command parses arguments and `--help` before loading
+- [x] Ensure every current command parses arguments and `--help` before loading
   data, models, plotting, or CUDA state.
 - [x] Preserve both direct-script and module execution from this project root.
 
@@ -64,8 +64,8 @@ ordering, and output labels.
 
 - [ ] Run inference import and deterministic CPU behavior tests under `basic`
   with the selected PyTorch extra.
-- [ ] Run all standalone tool invocation tests and the full suite under `dev`.
-- [ ] Verify parent-root import and root semantic stage behavior.
+- [x] Run all standalone tool invocation tests and the full suite under `dev`.
+- [x] Verify parent-root import and root semantic stage behavior.
 - [ ] Run production-weight CUDA verification separately on supported Linux
   hardware.
 - [ ] Change dependency groups only after these workflow checks pass.

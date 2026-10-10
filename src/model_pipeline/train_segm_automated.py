@@ -4,13 +4,13 @@ from __future__ import annotations
 import pathlib as pth
 import numpy as np
 from pprint import pprint
-from typing import Union, Sequence
-import itertools
+from typing import Union
 import sys
 import argparse
 import logging
 import datetime
 import multiprocessing
+import runpy
 
 
 _training_dependencies_loaded = False
@@ -33,28 +33,15 @@ def _load_training_dependencies():
 
     matplotlib.use('Agg')
 
-    if __package__:
-        from ._train_single_case import train_model as train
-        from .randlanet_cb import Randlanet as randlanet
-        from ..utils.nn_utils import (
-            Plotter as plotter,
-            convert_str_values as convert_values,
-            load_json as load_config_file,
-            save_model as save_model_file,
-            save_to_json as save_config_file,
-        )
-    else:
-        src_dir = pth.Path(__file__).parent.parent
-        sys.path.append(str(src_dir))
-        from _train_single_case import train_model as train
-        from randlanet_cb import Randlanet as randlanet
-        from utils.nn_utils import (
-            Plotter as plotter,
-            convert_str_values as convert_values,
-            load_json as load_config_file,
-            save_model as save_model_file,
-            save_to_json as save_config_file,
-        )
+    from ._train_single_case import train_model as train
+    from .randlanet_cb import Randlanet as randlanet
+    from ..utils.nn_utils import (
+        Plotter as plotter,
+        convert_str_values as convert_values,
+        load_json as load_config_file,
+        save_model as save_model_file,
+        save_to_json as save_config_file,
+    )
 
     torch = torch_module
     nn = nn_module
@@ -692,6 +679,17 @@ def main():
 
         
 
+def _run_direct_entry_point() -> None:
+    project_root = str(pth.Path(__file__).resolve().parents[2])
+    sys.path.insert(0, project_root)
+    try:
+        runpy.run_module("src.model_pipeline.train_segm_automated", run_name="__main__")
+    finally:
+        sys.path.remove(project_root)
+
+
 if __name__ == '__main__':
-    
-    main()
+    if __package__:
+        main()
+    else:
+        _run_direct_entry_point()

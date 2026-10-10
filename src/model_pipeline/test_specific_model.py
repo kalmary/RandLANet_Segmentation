@@ -2,16 +2,16 @@ import argparse
 import json
 from pathlib import Path
 
-import torch
-from torchinfo import summary
-
-if __package__:
-    from .randlanet_cb import Randlanet
-else:
-    from randlanet_cb import Randlanet
-
 
 def model_info(config_path: str, n_classes: int, device: str = 'cpu'):
+    import torch
+    from torchinfo import summary
+
+    if __package__:
+        from .randlanet_cb import Randlanet
+    else:
+        from randlanet_cb import Randlanet
+
     with open(config_path) as config_file:
         config = json.load(config_file)
     model = Randlanet(model_config=config, n_classes=n_classes).to(device)

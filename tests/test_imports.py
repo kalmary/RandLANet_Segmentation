@@ -7,6 +7,33 @@ import pytest
 
 
 @pytest.mark.parametrize(
+    ("module_name", "loader_name"),
+    [
+        ("src.data_processing.downsample_laz", "_load_preprocessing_dependencies"),
+        ("src.model_pipeline.eval_segm_randlanet", "_load_processing_dependencies"),
+        ("src.model_pipeline.train_segm_automated", "_load_training_dependencies"),
+    ],
+)
+def test_dependency_loaders_do_not_modify_import_paths(module_name, loader_name):
+    code = f"""
+import importlib
+import inspect
+
+module = importlib.import_module({module_name!r})
+loader_source = inspect.getsource(getattr(module, {loader_name!r}))
+assert 'sys.path' not in loader_source
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
     'module',
     [
         'array_processing',

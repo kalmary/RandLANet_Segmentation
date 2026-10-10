@@ -1,8 +1,9 @@
 import argparse
-from typing import Union
 import pathlib as pth
+import runpy
 import shutil
 import sys
+from typing import Union
 
 import random
 
@@ -24,26 +25,14 @@ def _load_preprocessing_dependencies():
     from sklearn.preprocessing import MinMaxScaler as min_max_scaler
     from tqdm import tqdm as progress_bar
 
-    if __package__:
-        from ..utils.pcd_manipulation import (
-            voxel_grid_fragmentation as fragment_voxel_grid,
-        )
-        from ..utils.nn_utils import (
-            convert_str_values as convert_values,
-            load_json as load_config,
-            save_to_json as save_config,
-        )
-    else:
-        main_dir = pth.Path(__file__).parent.parent
-        sys.path.insert(0, str(main_dir))
-        from utils.pcd_manipulation import (
-            voxel_grid_fragmentation as fragment_voxel_grid,
-        )
-        from utils.nn_utils import (
-            convert_str_values as convert_values,
-            load_json as load_config,
-            save_to_json as save_config,
-        )
+    from ..utils.pcd_manipulation import (
+        voxel_grid_fragmentation as fragment_voxel_grid,
+    )
+    from ..utils.nn_utils import (
+        convert_str_values as convert_values,
+        load_json as load_config,
+        save_to_json as save_config,
+    )
 
     h5py = h5py_module
     laspy = laspy_module
@@ -427,5 +416,17 @@ def main():
 
 
 
+def _run_direct_entry_point() -> None:
+    project_root = str(pth.Path(__file__).resolve().parents[2])
+    sys.path.insert(0, project_root)
+    try:
+        runpy.run_module("src.data_processing.downsample_laz", run_name="__main__")
+    finally:
+        sys.path.remove(project_root)
+
+
 if __name__ == '__main__':
-    main()
+    if __package__:
+        main()
+    else:
+        _run_direct_entry_point()
