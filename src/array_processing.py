@@ -1,5 +1,3 @@
-# pyright: reportImplicitRelativeImport=false
-
 import argparse
 import gc
 import os

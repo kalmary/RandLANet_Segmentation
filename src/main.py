@@ -35,6 +35,9 @@ def _load_processing_dependencies():
 def iter_files(args_dict):
     """Iterates over files in a directory and processes them using the SegmentClass instance."""
     _load_processing_dependencies()
+    assert laspy is not None
+    assert torch is not None
+    assert SegmentClass is not None
     input_path = pth.Path(args_dict.get('input_path'))
     output_path_value = args_dict.get('output_path')
     output_path = pth.Path(output_path_value) if output_path_value else None
@@ -57,14 +60,16 @@ def iter_files(args_dict):
         raise FileNotFoundError(f"Input path does not exist: {input_path}")
 
     if args_dict.get('verbose'):
-        path_generator = tqdm(
+        progress = tqdm(
             file_paths,
             total=len(file_paths),
             desc="Processing files",
             unit="file",
             leave=False,
         )
+        path_generator = progress
     else:
+        progress = None
         path_generator = file_paths
 
     # Create an instance of SegmentClass
@@ -76,8 +81,8 @@ def iter_files(args_dict):
                                  verbose=args_dict.get('verbose'))
     
     for file_path in path_generator:
-        if args_dict.get('verbose'):
-            path_generator.set_postfix_str(f"Processing {file_path.name}")
+        if progress is not None:
+            progress.set_postfix_str(f"Processing {file_path.name}")
 
         if output_path is not None:
             new_path = output_path.joinpath(f"{file_path.stem}_mod{file_path.suffix}")
@@ -89,16 +94,20 @@ def iter_files(args_dict):
         shutil.copy(file_path, new_path)
 
         laz = laspy.read(new_path)
-        points = np.vstack([laz.x, laz.y, laz.z]).T
+        points = np.vstack(
+            [np.asarray(laz.x), np.asarray(laz.y), np.asarray(laz.z)]
+        ).T
         intensity = np.asarray(laz.intensity)
 
         labels = segment_class.segment_pcd(points, intensity)
 
         laz.classification = labels
-        laz.write(new_path)
+        laz.write(str(new_path))
 
 def run_test_mode(args_dict):
     _load_processing_dependencies()
+    assert torch is not None
+    assert SegmentClass is not None
     device_name = args_dict.get('device')
     device = torch.device(
         'cuda'
@@ -259,6 +268,7 @@ def test_iter_files_processes_each_input_once(tmp_path, monkeypatch):
         classification = None
 
         def write(self, path):
+            assert self.classification is not None
             writes.append((pth.Path(path), self.classification.copy()))
 
     class FakeSegmenter:
@@ -271,6 +281,7 @@ def test_iter_files_processes_each_input_once(tmp_path, monkeypatch):
             device,
             verbose,
         ):
+            assert torch is not None
             assert voxel_size_big == 100.0
             assert overlap == 0.4
             assert scaled is True
