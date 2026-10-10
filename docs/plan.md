@@ -62,7 +62,7 @@ ordering, and output labels.
 
 ## Task 4: Verify dependency ownership
 
-- [ ] Run inference import and deterministic CPU behavior tests under `basic`
+- [x] Run inference import and deterministic CPU behavior tests under `basic`
   with the selected PyTorch extra.
 - [x] Run all standalone tool invocation tests and the full suite under `dev`.
 - [x] Verify parent-root import and root semantic stage behavior.
