@@ -1,40 +1,45 @@
-from typing import Union, Optional, Any, Tuple, Dict, List
-from joblib import Parallel, delayed
-from multiprocessing import shared_memory
-import pathlib as pth
-import os
-import sys
+import argparse
 import gc
-from tqdm import tqdm
+import os
+import pathlib as pth
+import sys
+from multiprocessing import shared_memory
+from typing import Any
 
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.neighbors import KDTree
 import torch
-import torch.nn as nn
+from joblib import Parallel, delayed
+from numpy.typing import NDArray
+from sklearn.neighbors import KDTree
+from sklearn.preprocessing import MinMaxScaler
+from torch import nn
 
-try:
-    from .final_files.RandLANet_CB import RandLANet
-    from .utils import load_json, load_model, pcd_manipulation
-except ImportError:
-    try:
-        from final_files.RandLANet_CB import RandLANet
-        from utils import load_json, load_model, pcd_manipulation
-    except ImportError:
-        from PCDSegmentation.src.final_files.RandLANet_CB import RandLANet
-        from PCDSegmentation.src.utils import load_json, load_model, pcd_manipulation
+if __package__:
+    from .final_files.randlanet_cb import Randlanet
+    from .utils import pcd_manipulation
+    from .utils.nn_utils import load_json, load_model
+else:
+    from final_files.randlanet_cb import Randlanet
+
+    from utils import pcd_manipulation
+    from utils.nn_utils import load_json, load_model
+
+
+DEFAULT_DEVICE = torch.device("cpu")
+
 
 class SegmentClass:
     def __init__(self,
                  voxel_size_big: float = 200.,
                  overlap: float = 0.4,
                  scaled: bool = False,
-                 model_name: str = None,
-                 config_dir: Union[str, pth.Path] = "final_files",
-                 device: torch.device = torch.device('cpu'),
+                 model_name: str | None = None,
+                 config_dir: str | pth.Path = "final_files",
+                 model_dir: str | pth.Path | None = None,
+                 device: str | torch.device = DEFAULT_DEVICE,
                  verbose: bool = False):
         
-        self.voxel_size_small = None
+        self.voxel_size_small: float
         self.voxel_size_big = voxel_size_big
         self.overlap = overlap
         self.scaled = scaled
@@ -42,9 +47,7 @@ class SegmentClass:
             raise ValueError("model_name cannot be None")
         self.model_name = model_name + '.pt'
 
-        if isinstance(device, str):
-            self.device = torch.device(device)
-        self.device = device
+        self.device = torch.device(device) if isinstance(device, str) else device
 
         self.verbose = verbose
 
@@ -53,28 +56,43 @@ class SegmentClass:
             self._scaler = self._init_scaler(feature_range=(0, 1))
         
         self.base_path = pth.Path(__file__).parent
-        config_dir = self.base_path.joinpath(config_dir)
-        self._config = None
-        self._model_config = None
+        config_dir = pth.Path(config_dir)
+        if not config_dir.is_absolute():
+            config_dir = self.base_path / config_dir
+        if model_dir is None:
+            model_dir = config_dir
+        else:
+            model_dir = pth.Path(model_dir)
+            if not model_dir.is_absolute():
+                model_dir = self.base_path / model_dir
+        self._config: dict[str, Any]
+        self._model_config: dict[str, Any]
         self._load_config(config_dir)
-        self._model = self._load_segmModel(config_dir)
+        self._model = self._load_segm_model(model_dir)
 
 
     # TODO adjust model loading 
-    def _load_config(self, config_dir: Optional[Union[pth.Path, str]] = None) -> dict:
+    def _load_config(self, config_dir: pth.Path | str) -> dict[str, Any]:
 
         config_path = pth.Path(config_dir).joinpath(self.model_name.replace('.pt', '_config.json'))
         config_dict = load_json(config_path)
         self._config = config_dict
-        self._model_config: dict = config_dict['model_config']
-        self.voxel_size_small: float = self._model_config['max_voxel_dim']
+        self._model_config = config_dict['model_config']
+        top_level_classes = int(config_dict['num_classes'])
+        nested_classes = self._model_config.get('num_classes')
+        if nested_classes is not None and int(nested_classes) != top_level_classes:
+            raise ValueError(
+                'num_classes differs between the top-level and model configuration'
+            )
+        self._model_config['num_classes'] = top_level_classes
+        self.voxel_size_small = self._model_config['max_voxel_dim']
 
         return config_dict
 
-    def _load_segmModel(self, model_dir: Union[pth.Path, str] = "./final_files") -> nn.Module:
+    def _load_segm_model(self, model_dir: pth.Path | str = "./final_files") -> nn.Module:
 
         path2model = pth.Path(model_dir).joinpath(self.model_name)
-        model = RandLANet(self._config["model_config"], self._config['num_classes'])
+        model = Randlanet(self._config["model_config"], self._config['num_classes'])
         self._model: nn.Module = load_model(file_path=path2model,
                                             model=model,
                                             device=self.device)
@@ -84,20 +102,28 @@ class SegmentClass:
 
         return self._model
     
-    def _init_scaler(self, feature_range: Tuple[int] = (0, 10)) -> MinMaxScaler:
+    def _init_scaler(self, feature_range: tuple[int, int] = (0, 10)) -> MinMaxScaler:
         self._scaler = MinMaxScaler(feature_range)
         return self._scaler
     
     @property
-    def model_config(self) -> dict:
+    def model_config(self) -> dict[str, Any]:
         return self._model_config
+
+    @property
+    def config(self) -> dict[str, Any]:
+        return self._config
+
+    @property
+    def n_classes(self) -> int:
+        return int(self._config['num_classes'])
     
     @property
     def model(self) -> nn.Module:
         return self._model
     
     @property
-    def scaler(self) -> MinMaxScaler:
+    def scaler(self) -> MinMaxScaler | None:
         return self._scaler
     
     @staticmethod
@@ -143,7 +169,8 @@ class SegmentClass:
         if voxel_all.shape[0] == 0:
             return np.zeros(points.shape[0], dtype=np.int32)
 
-        n_workers = os.cpu_count() if num_workers <= 0 else min(num_workers, os.cpu_count())
+        available_workers = os.cpu_count() or 1
+        n_workers = available_workers if num_workers <= 0 else min(num_workers, available_workers)
         k_neighbors_upsampling = min(k_neighbors_upsampling, voxel_all.shape[0])
 
         def make_shm(arr):
@@ -187,13 +214,16 @@ class SegmentClass:
                 except FileNotFoundError:
                     pass
     
-    def _model_predict(self, voxel: torch.Tensor) -> torch.Tensor:
+    def _model_predict(
+        self,
+        voxel: NDArray[np.number[Any]],
+    ) -> NDArray[np.float32]:
 
 
-        voxel = torch.from_numpy(voxel).float().to(self.device)
-        voxel = voxel.unsqueeze(dim = 0)
+        voxel_tensor = torch.from_numpy(voxel).float().to(self.device)
+        voxel_tensor = voxel_tensor.unsqueeze(dim = 0)
         with torch.no_grad():
-            voxel_probs = self._model(voxel)
+            voxel_probs = self._model(voxel_tensor)
         voxel_probs = voxel_probs.permute(0, 2, 1).squeeze(dim = 0).cpu().numpy()
 
         return voxel_probs
@@ -208,7 +238,7 @@ class SegmentClass:
         voxel_probs_all = np.full((points.shape[0], num_classes + 1), 0.0, dtype=np.float32)
         filled_mask = np.zeros(points.shape[0], dtype=bool)
 
-        generator = pcd_manipulation.voxelGridFragmentation(points,
+        generator = pcd_manipulation.voxel_grid_fragmentation(points,
                                                             voxel_size = np.array([self.voxel_size_small, self.voxel_size_small]),
                                                             num_points = self._config['num_points'],
                                                             overlap_ratio=0.4,
@@ -281,7 +311,7 @@ class SegmentClass:
     def _segment_big_voxel(self, points: np.ndarray, intensity: np.ndarray) -> np.ndarray:
         labels = np.zeros(intensity.shape, dtype=np.int32)
 
-        for indices, _ in pcd_manipulation.voxelGridFragmentation(data=points,
+        for indices, _ in pcd_manipulation.voxel_grid_fragmentation(data=points,
                                                                num_points=0,
                                                                voxel_size=np.array([self.voxel_size_big, self.voxel_size_big]),
                                                                overlap_ratio=0,
@@ -305,7 +335,7 @@ class SegmentClass:
 
         return labels
 
-    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 7e6) -> np.ndarray:
+    def segment_pcd(self, points: np.ndarray, intensity: np.ndarray, fragment_pcd_threshold: int = 7_000_000) -> np.ndarray:
         if points.shape[0] == 0:
             return np.zeros(0, dtype=np.int32)
         if points.shape[0] != intensity.shape[0]:
@@ -314,6 +344,7 @@ class SegmentClass:
             )
 
         if self.scaled: # TODO enable it if necessary
+            assert self._scaler is not None
             intensity = self._scaler.fit_transform(intensity.reshape(-1, 1))
         intensity = intensity.flatten()
 
@@ -329,34 +360,208 @@ class SegmentClass:
         return labels
 
         
-def test_segm():
-    path2laz = "/mnt/SSD_EXT4_1TB/DATA/GRAJEWO/Grajewo_michal_mod.laz"
-
+def run_segmentation_example(
+    input_path: str | pth.Path,
+    model_name: str = "RandLANetV8_2",
+    config_dir: str | pth.Path | None = None,
+    device: str = "cpu",
+    plot: bool = False,
+    verbose: bool = True,
+):
     import laspy
-    import pathlib as pth
 
-    path2laz = pth.Path(path2laz)
-    las = laspy.read(path2laz)
-    points = np.vstack((las.x, las.y, las.z)).transpose()
+    input_path = pth.Path(input_path)
+    if config_dir is None:
+        config_dir = pth.Path(__file__).resolve().parent / "final_files"
+
+    las = laspy.read(input_path)
+    points = np.column_stack(
+        (np.asarray(las.x), np.asarray(las.y), np.asarray(las.z))
+    )
     intensity = np.asarray(las.intensity)
 
     segmenter = SegmentClass(
         voxel_size_big=200.,
         overlap=0.4,
         scaled=True,
-        model_name="RandLANetV8_2",
-        config_dir="final_files",
-        device = torch.device('cuda'),
-        verbose = True)
+        model_name=model_name,
+        config_dir=config_dir,
+        device=torch.device(device),
+        verbose=verbose,
+    )
     
     labels = segmenter.segment_pcd(points=points,
-                          intensity=intensity)
-    
-    from utils import plot_cloud
-    plot_cloud(points, labels)
+                                   intensity=intensity)
+
+    if plot:
+        if __package__:
+            from .utils.plot_cloud import plot_cloud
+        else:
+            from utils.plot_cloud import plot_cloud
+        plot_cloud(points, labels)
+
+    return labels
+
+
+def example_argparser(argv=None):
+    module_dir = pth.Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(
+        description="Run semantic segmentation on one LAZ file."
+    )
+    parser.add_argument("--input-path", type=pth.Path, required=True)
+    parser.add_argument("--model-name", default="RandLANetV8_2")
+    parser.add_argument(
+        "--config-dir",
+        type=pth.Path,
+        default=module_dir / "final_files",
+    )
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--plot",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = example_argparser(argv)
+    return run_segmentation_example(
+        input_path=args.input_path,
+        model_name=args.model_name,
+        config_dir=args.config_dir,
+        device=args.device,
+        plot=args.plot,
+        verbose=args.verbose,
+    )
+
+
+def test_example_parser_disables_plot_by_default(tmp_path):
+    args = example_argparser(["--input-path", str(tmp_path / "cloud.laz")])
+
+    assert args.plot is False
+
+
+def test_segment_pcd_empty_input_returns_empty_int32():
+    segmenter = SegmentClass.__new__(SegmentClass)
+
+    result = segmenter.segment_pcd(np.empty((0, 3)), np.empty(0))
+
+    assert result.shape == (0,)
+    assert result.dtype == np.int32
+
+
+def test_segment_pcd_rejects_point_intensity_length_mismatch():
+    import pytest
+
+    segmenter = SegmentClass.__new__(SegmentClass)
+
+    with pytest.raises(ValueError, match="points and intensity length mismatch"):
+        segmenter.segment_pcd(np.zeros((2, 3)), np.zeros(1))
+
+
+def test_segment_pcd_centers_points_and_preserves_label_order(monkeypatch):
+    segmenter = SegmentClass.__new__(SegmentClass)
+    segmenter.scaled = False
+    points = np.array([[10.0, 0.0, 1.0], [11.0, 1.0, 2.0], [12.0, 2.0, 3.0]])
+    original = points.copy()
+    intensity = np.array([3, 2, 1])
+    observed = {}
+
+    def segment_small(centered_points, values):
+        observed["points"] = centered_points
+        observed["intensity"] = values
+        return np.array([2, 1, 0], dtype=np.int32)
+
+    monkeypatch.setattr(segmenter, "_segment_small_voxel", segment_small)
+
+    result = segmenter.segment_pcd(points, intensity, fragment_pcd_threshold=4)
+
+    np.testing.assert_array_equal(result, np.array([2, 1, 0], dtype=np.int32))
+    np.testing.assert_array_equal(points, original)
+    np.testing.assert_allclose(observed["points"].mean(axis=0), np.zeros(3))
+    assert observed["points"].dtype == np.float32
+    np.testing.assert_array_equal(observed["intensity"], intensity)
+
+
+def test_segment_pcd_uses_big_voxels_at_fragmentation_threshold(monkeypatch):
+    segmenter = SegmentClass.__new__(SegmentClass)
+    segmenter.scaled = False
+    observed = []
+
+    def segment_big(points, intensity):
+        observed.append(points.shape[0])
+        return np.array([1, 0], dtype=np.int32)
+
+    monkeypatch.setattr(segmenter, "_segment_big_voxel", segment_big)
+
+    result = segmenter.segment_pcd(
+        np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]),
+        np.array([1, 2]),
+        fragment_pcd_threshold=2,
+    )
+
+    np.testing.assert_array_equal(result, np.array([1, 0], dtype=np.int32))
+    assert observed == [2]
+
+
+def test_segment_class_accepts_separate_config_and_model_directories(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def load_config(self, directory):
+        calls.append(("config", pth.Path(directory)))
+        self._config = {"num_classes": 4, "model_config": {"max_voxel_dim": 20}}
+        self._model_config = self._config["model_config"]
+        self.voxel_size_small = 20
+        return self._config
+
+    def load_model(self, directory):
+        calls.append(("model", pth.Path(directory)))
+        return object()
+
+    monkeypatch.setattr(SegmentClass, "_load_config", load_config)
+    monkeypatch.setattr(SegmentClass, "_load_segm_model", load_model)
+    config_dir = tmp_path / "configs"
+    model_dir = tmp_path / "models"
+
+    segmenter = SegmentClass(
+        model_name="network_1",
+        config_dir=config_dir,
+        model_dir=model_dir,
+    )
+
+    assert calls == [("config", config_dir), ("model", model_dir)]
+    assert segmenter.config["num_classes"] == 4
+    assert segmenter.n_classes == 4
+    assert segmenter.device == torch.device("cpu")
+
+    calls.clear()
+    SegmentClass(model_name="network_1", config_dir=config_dir)
+    assert calls == [("config", config_dir), ("model", config_dir)]
+
+
+def test_load_config_normalizes_top_level_class_count(tmp_path, monkeypatch):
+    config = {
+        "num_classes": 4,
+        "model_config": {"max_voxel_dim": 20},
+    }
+    monkeypatch.setattr(sys.modules[__name__], "load_json", lambda path: config)
+    segmenter = SegmentClass.__new__(SegmentClass)
+    segmenter.model_name = "network_1.pt"
+
+    segmenter._load_config(tmp_path)
+
+    assert segmenter.model_config["num_classes"] == 4
 
 
 
 
 if __name__ == '__main__':
-    test_segm()
+    main()

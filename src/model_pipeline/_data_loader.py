@@ -1,27 +1,14 @@
+import argparse
 import pathlib as pth
 import numpy as np
 import random
 import h5py
-from typing import Optional, Union, OrderedDict
+from typing import Optional, Union
 
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
 
 import fpsample
-import random
-
-import sys
-import os
-
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from utils import rotate_points, tilt_points, transform_points, add_gaussian_noise
-
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
 
 class Dataset(IterableDataset):
 
@@ -126,11 +113,43 @@ class Dataset(IterableDataset):
 
             yield batch_data_tensor, batch_labels_tensor
 
-def test():
-    path = '/mnt/DATA_SSD/BRIK/SEMANTIC_SEGM/voxel/converted/validation.h5'
-    dataset = Dataset(path, mode=0, num_points=8192, batch_size=1, shuffle=False)
-    for i, (data, labels) in enumerate(dataset):
+def inspect_dataset(input_path, mode=0, num_points=8192, batch_size=1,
+                    shuffle=False, device="cpu"):
+    dataset = Dataset(
+        input_path,
+        mode=mode,
+        num_points=num_points,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        device=torch.device(device),
+    )
+    for data, labels in dataset:
         data_avg = data.squeeze(0)
         print(data_avg.min(axis = 0).values, data_avg.max(axis = 0).values)
+
+
+def argparser(argv=None):
+    parser = argparse.ArgumentParser(description="Inspect batches from an HDF5 point-cloud dataset.")
+    parser.add_argument("--input-path", type=pth.Path, required=True)
+    parser.add_argument("--mode", type=int, default=0)
+    parser.add_argument("--num-points", type=int, default=8192)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--shuffle", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--device", default="cpu")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = argparser(argv)
+    inspect_dataset(
+        args.input_path,
+        mode=args.mode,
+        num_points=args.num_points,
+        batch_size=args.batch_size,
+        shuffle=args.shuffle,
+        device=args.device,
+    )
+
+
 if __name__ == '__main__':
-    test()
+    main()

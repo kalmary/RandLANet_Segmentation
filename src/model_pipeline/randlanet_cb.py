@@ -1,19 +1,22 @@
+import argparse
+import importlib.util
+from pathlib import Path
+
 import torch
 import torch.nn as nn
-from torchinfo import summary
 
-import pathlib as pth
-import sys
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-try:
-    from ..utils import KNNCache
-except ImportError:
-    from utils import KNNCache
+if __package__ == "model_pipeline":
+    from utils.knn_torch import KnnCache
+elif __package__:
+    from ..utils.knn_torch import KnnCache
+else:
+    knn_module_path = Path(__file__).resolve().parents[1] / "utils" / "knn_torch.py"
+    knn_module_spec = importlib.util.spec_from_file_location("knn_torch", knn_module_path)
+    knn_module = importlib.util.module_from_spec(knn_module_spec)
+    knn_module_spec.loader.exec_module(knn_module)
+    KnnCache = knn_module.KnnCache
 
 import json
-from pathlib import Path
 from typing import Union, Dict, Any, Optional
 
 
@@ -29,7 +32,7 @@ def input_norm(input: torch.Tensor, max_voxel_dim=20.):
 
 
 
-class SharedMLP(nn.Module):
+class SharedMlp(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1,
                  transpose=False, padding_mode='zeros', bn=False, activation_fn=None):
         super().__init__()
@@ -52,7 +55,7 @@ class LocalSpatialEncoding(nn.Module):
     def __init__(self, d, num_neighbors):
         super().__init__()
         self.num_neighbors = num_neighbors
-        self.mlp = SharedMLP(10, d, bn=True, activation_fn=nn.ReLU())
+        self.mlp = SharedMlp(10, d, bn=True, activation_fn=nn.ReLU())
 
     def forward(self, coords, features, knn_output):
         idx, dist = knn_output
@@ -80,8 +83,8 @@ class LocalSpatialEncoding(nn.Module):
 class AttentivePooling(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.score_mlp  = SharedMLP(in_channels, in_channels, bn=False, activation_fn=None)
-        self.output_mlp = SharedMLP(in_channels, out_channels, bn=True, activation_fn=nn.ReLU())
+        self.score_mlp  = SharedMlp(in_channels, in_channels, bn=False, activation_fn=None)
+        self.output_mlp = SharedMlp(in_channels, out_channels, bn=True, activation_fn=nn.ReLU())
 
     def forward(self, x):
         scores   = torch.softmax(self.score_mlp(x), dim=-1)
@@ -94,16 +97,16 @@ class LocalFeatureAggregation(nn.Module):
     def __init__(self, d_in, d_out, num_neighbors):
         super().__init__()
         self.num_neighbors = num_neighbors
-        self.mlp1     = SharedMLP(d_in,   d_out//2, activation_fn=nn.ReLU())
-        self.mlp2     = SharedMLP(d_out,  2*d_out)
-        self.shortcut = SharedMLP(d_in,   2*d_out,  bn=True, activation_fn=nn.ReLU())
+        self.mlp1     = SharedMlp(d_in,   d_out//2, activation_fn=nn.ReLU())
+        self.mlp2     = SharedMlp(d_out,  2*d_out)
+        self.shortcut = SharedMlp(d_in,   2*d_out,  bn=True, activation_fn=nn.ReLU())
         self.lse1     = LocalSpatialEncoding(d_out//2, num_neighbors)
         self.lse2     = LocalSpatialEncoding(d_out//2, num_neighbors)
         self.pool1    = AttentivePooling(d_out, d_out//2)
         self.pool2    = AttentivePooling(d_out, d_out)
         self.relu     = nn.ReLU()
 
-    def forward(self, coords_idx, knn_query: KNNCache, features):
+    def forward(self, coords_idx, knn_query: KnnCache, features):
         knn_output = knn_query.query(coords_idx, coords_idx, self.num_neighbors)
         coords     = knn_query.get_coords(coords_idx)
         x = self.mlp1(features)
@@ -112,7 +115,7 @@ class LocalFeatureAggregation(nn.Module):
         return self.relu(self.mlp2(x) + self.shortcut(features))
 
 
-class RandLANet(nn.Module):
+class Randlanet(nn.Module):
     def __init__(self, model_config: dict, n_classes: int):
         super().__init__()
 
@@ -120,7 +123,7 @@ class RandLANet(nn.Module):
         self.num_neighbors           = model_config['num_neighbors']
         self._num_neighbors_upsample = 3
         self.decimation              = model_config['decimation']
-        self.KNN                     = KNNCache()
+        self.knn                     = KnnCache()
 
         encoder_layers  = model_config['encoder_layers']
         decoder_layers  = model_config['decoder_layers']
@@ -128,7 +131,7 @@ class RandLANet(nn.Module):
         fc_end_config   = model_config.get('fc_end',   {'layers': [64, 32], 'dropout': 0.5})
 
         fc_start_d_out = fc_start_config.get('d_out', 8)
-        self.fc_start  = SharedMLP(d_in, fc_start_d_out, bn=True, activation_fn=nn.ReLU())
+        self.fc_start  = SharedMlp(d_in, fc_start_d_out, bn=True, activation_fn=nn.ReLU())
 
         self.encoder = nn.ModuleList([
             LocalFeatureAggregation(l['d_in'], l['d_out'], self.num_neighbors)
@@ -136,10 +139,10 @@ class RandLANet(nn.Module):
         ])
 
         mlp_dim  = 2 * encoder_layers[-1]['d_out']
-        self.mlp = SharedMLP(mlp_dim, mlp_dim, activation_fn=nn.ReLU())
+        self.mlp = SharedMlp(mlp_dim, mlp_dim, activation_fn=nn.ReLU())
 
         self.decoder = nn.ModuleList([
-            SharedMLP(l['d_in'], l['d_out'], transpose=True, bn=True, activation_fn=nn.ReLU())
+            SharedMlp(l['d_in'], l['d_out'], transpose=True, bn=True, activation_fn=nn.ReLU())
             for l in decoder_layers
         ])
 
@@ -152,13 +155,13 @@ class RandLANet(nn.Module):
         fc_end_modules = []
 
         for d_out in fc_end_layers:
-            fc_end_modules.append(SharedMLP(current_d, d_out, bn=True, activation_fn=nn.ReLU()))
+            fc_end_modules.append(SharedMlp(current_d, d_out, bn=True, activation_fn=nn.ReLU()))
             current_d = d_out
 
         if fc_end_dropout > 0:
             fc_end_modules.append(nn.Dropout(fc_end_dropout))
 
-        fc_end_modules.append(SharedMLP(current_d, n_classes))
+        fc_end_modules.append(SharedMlp(current_d, n_classes))
         self.fc_end = nn.Sequential(*fc_end_modules)
 
     @classmethod
@@ -182,7 +185,7 @@ class RandLANet(nn.Module):
             input = input[:, permutation]
 
         coords = input[..., :3]
-        self.KNN.build(coords)
+        self.knn.build(coords)
 
         x = self.fc_start(input.transpose(-2, -1).unsqueeze(-1))  # (B, d, N, 1)
 
@@ -192,7 +195,7 @@ class RandLANet(nn.Module):
         # encoder
         for lfa in self.encoder:
             current_indices = torch.arange(N // decimation_ratio, device=coords.device)
-            x = lfa(current_indices, self.KNN, x)
+            x = lfa(current_indices, self.knn, x)
             x_stack.append(x)
             decimation_ratio *= d
             x = x[:, :, :N // decimation_ratio]
@@ -204,7 +207,7 @@ class RandLANet(nn.Module):
             down_indices = torch.arange(N // decimation_ratio,     device=coords.device)
             up_indices   = torch.arange(d * N // decimation_ratio, device=coords.device)
 
-            neighbors, distances = self.KNN.query(down_indices, up_indices,
+            neighbors, distances = self.knn.query(down_indices, up_indices,
                                                    self._num_neighbors_upsample)
             _, C, _, _ = x.size()
             neighbors  = neighbors.long()
@@ -232,7 +235,7 @@ class RandLANet(nn.Module):
             decimation_ratio //= d
 
         del x_stack
-        self.KNN.clear()
+        self.knn.clear()
 
         out = self.fc_end(x).squeeze(-1)  # (B, n_classes, N)
 
@@ -242,7 +245,7 @@ class RandLANet(nn.Module):
         return out
 
 
-def test_model():
+def test_model(device="cpu", batch_size=4, num_points=8192, n_classes=10):
     model_config = {
         "d_in": 4,
         "num_neighbors": 32,
@@ -263,18 +266,33 @@ def test_model():
         "fc_end":   {"layers": [32, 16], "dropout": 0.5}
     }
 
-    B, N, n_classes = 4, 8192, 10
-    dummy = torch.randn(B, N, model_config['d_in']).cuda()
-    model = RandLANet(model_config, n_classes=n_classes).cuda()
+    dummy = torch.randn(batch_size, num_points, model_config['d_in'], device=device)
+    model = Randlanet(model_config, n_classes=n_classes).to(device)
 
     out = model(dummy)
-    expected = (B, n_classes, N)
+    expected = (batch_size, n_classes, num_points)
     assert out.shape == expected, f"Expected {expected}, got {out.shape}"
     print(f"Success! Output: {out.shape}")
 
 
+def argparser(argv=None):
+    parser = argparse.ArgumentParser(description="Run a RandLANet model smoke test.")
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--num-points", type=int, default=8192)
+    parser.add_argument("--n-classes", type=int, default=10)
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = argparser(argv)
+    test_model(
+        device=args.device,
+        batch_size=args.batch_size,
+        num_points=args.num_points,
+        n_classes=args.n_classes,
+    )
+
+
 if __name__ == '__main__':
-    test_model()
-
-
-
+    main()

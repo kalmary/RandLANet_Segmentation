@@ -39,21 +39,21 @@ Key modifications we added:
 ├── img                          #README images and diagrams
 ├── src
 │   ├── data_processing
-│   │   └── downsample_LAZ.py    #Preprocessing pipeline for LAZ files and training datasets
+│   │   └── downsample_laz.py    #Preprocessing pipeline for LAZ files and training datasets
 │   ├── final_files              #Pretrained/final models, configs and inference model code
 │   ├── main.py                  #Main semantic segmentation entrypoint
 │   ├── model_pipeline
-│   │   ├── TrainSegmAutomated.py
-│   │   ├── EvalSegm_RandLANet.py
-│   │   ├── RandLANet_CB.py
+│   │   ├── train_segm_automated.py
+│   │   ├── eval_segm_randlanet.py
+│   │   ├── randlanet_cb.py
 │   │   ├── model_configs        #Model architecture configs
 │   │   ├── training_configs     #Training parameter configs
 │   │   └── training_results     #Training and evaluation outputs
 │   └── utils
 │       ├── nn_utils             #External/shared neural-network utilities
 │       └── pcd_manipulation.py  #Point cloud manipulation utilities
-├── requirements.txt
-├── requirements_pytorch.txt
+├── pyproject.toml
+├── uv.lock
 └── README.md
 ```
 ---
@@ -70,40 +70,46 @@ cd RandLANet_Segmentation
 git pull
 git submodule update --init --recursive
 
-git submodule foreach --recursive git checkout main
-git submodule foreach --recursive git pull origin main
+git submodule foreach --recursive git checkout development
 ```
 
-Create and activate a Virtual Environment and install requirements:
+Create the uv environment with Python 3.12 and choose one PyTorch profile:
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-
-# Install all requirements, without pytorch and cuda
-pip install requirements.txt
-
-# Tested on this, but should work with any other version
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+uv sync --extra pytorch-cpu  # core runtime, CPU-only
+uv sync --group dev --extra pytorch-cpu  # CPU-only on macOS, Windows, or Linux
+# macOS system profile (also CPU): uv sync --group dev --extra pytorch-macos
+# Linux with CUDA 13.2: uv sync --group dev --extra pytorch-linux-cuda
+# Windows with CUDA 13.2: uv sync --group dev --extra pytorch-windows-cuda
 
 # update git submodules
 git submodule update --init --recursive
 ```
 
+The default `basic` group provides array-based inference. The `dev` group adds LAS/LAZ and HDF5 support together with preprocessing, training, evaluation, plotting, and test dependencies. After syncing, `uv run --no-sync` preserves the selected groups and PyTorch profile.
+
 ---
 
 # 4. Usage <a name="usage"></a>
+
+The main entry point supports both forms:
+
+```bash
+uv run --no-sync python src/main.py --help
+uv run --no-sync python -m src.main --help
+```
+
 ## 1. Preprocessing <a name="preprocessing"></a>
 
 Before training a model, data preprocessing must be done. To do so run:
 ```bash
-python src/data_processing/downsample_LAZ.py --source_path path/to/raw/data --decimated_path path/to/decimated/pcds --converted_path path/to/final/processed/files
+uv run --no-sync python src/data_processing/downsample_laz.py --source-path path/to/raw/data --decimated-path path/to/decimated/pcds --converted-path path/to/final/processed/files
 ```
 Paths used when processing:
 - source_path: directory with raw (.LAZ by default) point clouds,
 - decimated_path: serves as a checkpoint. Files are cut, decimated and saved as .npy files,
 - converted_path: final directory with processed files, distributed into training/ validation/ testing datasets, chunked into .h5 files,
 
-For more guidance/ guidance when running code, run it with ``--help`` flag.
+For more guidance when running code, run it with the ``--help`` flag.
 
 ## 2. Training <a name="training"></a>
 Examine contents of:
@@ -115,8 +121,7 @@ Files with `_single` suffix are meant for single training without any optimizati
 
 To start training run:
 ```bash
-cd src/model_pipeline
-python TrainSegmAutomated.py --model_name MODEL_NAME --device cuda --mode 2
+uv run --no-sync python src/model_pipeline/train_segm_automated.py --model-name MODEL_NAME --device cpu --mode 2
 ```
 Available flags:
 - ``model_name`` - name of your model. Results are stored in ``src/model_pipeline/training_results/MODEL_NAME``,
@@ -128,7 +133,7 @@ Available flags:
     - `3` - check models - run this to get a rough idea of model resource demands.
  
 
-For most optimal results we recommend using options based on multidimensional space of hyperparameters. If you choose Optuna based option you can change ``n_trials`` in ``main`` function of ``TrainSegmAutomated.py``:
+For most optimal results we recommend using options based on multidimensional space of hyperparameters. If you choose Optuna based option you can change ``n_trials`` in ``main`` function of ``train_segm_automated.py``:
 ```python
 optuna_based_training(exp_config=exp_configs,
                       model_name=model_name,
@@ -138,15 +143,14 @@ optuna_based_training(exp_config=exp_configs,
 ``n_trials=80`` is what we found to be giving good, repeatable results, but lower numbers where also acceptable. Even if the optimization process takes too long, 
 best model and its config are saved and overwritten if a better model is found. Alongside them, plots with metrics history (loss, accuracy, mIoU) are also saved.
 
-For more guidance/ guidance when running code, run it with ``--help`` flag.
+For more guidance when running code, run it with the ``--help`` flag.
 
 ## 3. Evaluation <a name="evaluation"></a>
 
-To evaluate trained model, run EvalSegm_RandLANet.py with proper flags:
+To evaluate trained model, run eval_segm_randlanet.py with proper flags:
 
 ```bash
-cd src/model_pipeline
-python src/model_pipeline/EvalSegm_RandLANet.py --model_name MODEL_NAME --device cuda --mode 1
+uv run --no-sync python src/model_pipeline/eval_segm_randlanet.py --model-name MODEL_NAME --raw-path path/to/raw/data --device cpu --mode 1
 ```
 ``model_name`` flag must be the exact name of model you got from training, but without extension name. For example:
 ```
@@ -171,7 +175,7 @@ Once models are trained, the best models and configs are choosen, copy the files
 
 To perform .LAZ files semantic segmentation, based on pretrained model run:
 ```bash
-src/python main.py --model_name MODEL_NAME --device cuda --input_path path/to/raw/data --output_path path/with/processed/files --mode 1 --verbose True
+uv run --no-sync python src/main.py --model-name MODEL_NAME --device cpu --input-path path/to/raw/data --output-path path/with/processed/files --mode 1 --verbose
 ```
 Available flags:
 - ``model_name`` - model name without its extension (.pt files supported),
@@ -185,21 +189,22 @@ Available flags:
 
 If more customizable approach is necessary/ point clouds are preloaded, you can also use just segmentation processing parts:
 ```python
-from array_processing import SegmentClass
 import numpy as np
-# voxel_size 100. is what we found to be optimal
-# you can modify voxel_size for your needs - lower for denser clouds
 
-segment_clas = SegmentClass(voxel_size_big=np.array([100., 100.],),
-                            overlap = 0.4,                       # float
-                            model_name=model_name,              # str
-                            config_dir="./final_files",         # str or pth.Path
-                            device=device,                      # torch.device
-                            pbar_bool = kwargs.get('verbose'))  # bool
+from src.array_processing import SegmentClass
 
-pcd = np.random.random(size = (10e6, 3))*100 # swap with actual point cloud
+segmenter = SegmentClass(
+    voxel_size_big=100.0,
+    overlap=0.4,
+    model_name="MODEL_NAME",
+    config_dir="final_files",
+    device="cpu",
+    verbose=True,
+)
 
-labels: np.ndarray = segment_class.segment_pcd(points, intensity)
+points = np.load("path/to/points.npy")
+intensity = np.load("path/to/intensity.npy")
+labels: np.ndarray = segmenter.segment_pcd(points, intensity)
 ```
 
 

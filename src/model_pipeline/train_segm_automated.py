@@ -1,46 +1,73 @@
-import matplotlib
-matplotlib.use('Agg')
+from __future__ import annotations
 
 
 import pathlib as pth
 import numpy as np
 from pprint import pprint
-from typing import Union, Sequence
-import itertools
+from typing import Union
 import sys
 import argparse
 import logging
 import datetime
 import multiprocessing
+import runpy
 
 
-import torch
-import torch.nn as nn
-from torchinfo import summary
-import optuna
-
-from tqdm import tqdm
+_training_dependencies_loaded = False
 
 
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
+def _load_training_dependencies():
+    global _training_dependencies_loaded
+    global Plotter, Randlanet, convert_str_values, load_json
+    global nn, optuna, save_model, save_to_json, summary, torch, tqdm, train_model
 
-from _train_single_case import train_model
-from utils import load_json, save2json, save_model, convert_str_values
-from utils import Plotter
+    if _training_dependencies_loaded:
+        return
 
-from RandLANet_CB import RandLANet
+    import matplotlib
+    import optuna as optuna_module
+    import torch as torch_module
+    import torch.nn as nn_module
+    from torchinfo import summary as model_summary
+    from tqdm import tqdm as progress_bar
+
+    matplotlib.use('Agg')
+
+    from ._train_single_case import train_model as train
+    from .randlanet_cb import Randlanet as randlanet
+    from ..utils.nn_utils import (
+        Plotter as plotter,
+        convert_str_values as convert_values,
+        load_json as load_config_file,
+        save_model as save_model_file,
+        save_to_json as save_config_file,
+    )
+
+    torch = torch_module
+    nn = nn_module
+    optuna = optuna_module
+    summary = model_summary
+    tqdm = progress_bar
+    train_model = train
+    Randlanet = randlanet
+    Plotter = plotter
+    convert_str_values = convert_values
+    load_json = load_config_file
+    save_model = save_model_file
+    save_to_json = save_config_file
+    _training_dependencies_loaded = True
 
 
 def check_models(model_configs_paths: list[pth.Path],
                  max_input_size = (1, 8192, 4),
-                 max_memory_GB = 20,
+                 max_memory_gb = 20,
                  verbose: bool = False) -> tuple[list[dict], list[pth.Path]]:
     """
     Check if models defined in NeuralNet/Architectures/models_1D/model_configs compile.
     Print models not compiling.
     Return list of model configs that compile.
     """
+    _load_training_dependencies()
 
     # str paths to pth.Path if neccessary
     model_configs_paths = [pth.Path(config) for config in model_configs_paths]
@@ -52,18 +79,18 @@ def check_models(model_configs_paths: list[pth.Path],
         model_config = convert_str_values(model_config)
 
         try:
-            model = RandLANet(model_config, 10)
+            model = Randlanet(model_config, 10)
             model.eval()
             model_summary = summary(model, input_size=max_input_size, verbose=0)
-            estimated_memory_GB = (model_summary.total_param_bytes + model_summary.total_output_bytes) / (1024 ** 3 )
+            estimated_memory_gb = (model_summary.total_param_bytes + model_summary.total_output_bytes) / (1024 ** 3 )
 
-            if estimated_memory_GB > max_memory_GB:
-                    raise MemoryError(f"Estimated memory {estimated_memory_GB:.2f} GB exceeds limit of {max_memory_GB:.2f} GB.")
+            if estimated_memory_gb > max_memory_gb:
+                    raise MemoryError(f"Estimated memory {estimated_memory_gb:.2f} GB exceeds limit of {max_memory_gb:.2f} GB.")
 
             del model, model_summary
 
             if verbose:
-                print(f"Model {model_config_path.name} compiled successfully\nEstimated memory: {estimated_memory_GB:.2f} GB.\n")
+                print(f"Model {model_config_path.name} compiled successfully\nEstimated memory: {estimated_memory_gb:.2f} GB.\n")
 
         except Exception as e:
             if verbose:
@@ -116,6 +143,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
     2 - multiple trainings, with optuna
     
     """
+    _load_training_dependencies()
     logger = logging.getLogger(__name__)
     logger.info(f'START: case_based_training.')
 
@@ -147,7 +175,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
         model_configs_paths_list = [p for p in model_configs_paths_list if "single" not in p.stem]
     
     training_config = convert_str_values(training_config)
-    model_configs_list, _ = check_models(model_configs_paths_list, max_memory_GB=32)
+    model_configs_list, _ = check_models(model_configs_paths_list, max_memory_gb=32)
     
     assert model_configs_list != 0, "No models compiled. Check model_configs - most likely too big models are defined"
 
@@ -176,6 +204,7 @@ def load_config(base_dir: Union[str, pth.Path], device_name: str, mode: int = 0)
         return exp_configs
 
 def test_case(exp_config: dict) -> None:
+    _load_training_dependencies()
     
     logger = logging.getLogger(__name__)
     logger.info(f'START: test_case.')
@@ -205,6 +234,7 @@ class Checkpoint:
                          final_val: float,
                          exp_config: dict,
                          result_hist: dict) -> tuple[nn.Module, dict, pth.Path]:
+        _load_training_dependencies()
     
         
 
@@ -255,7 +285,7 @@ class Checkpoint:
         best_config['device'] = str(best_config['device'])
 
         config_path = dict_files_dir.joinpath(f'{model_path.stem}_config.json')
-        save2json(best_config, config_path)
+        save_to_json(best_config, config_path)
         logger.info(f'New config for model {model_name} saved to: {config_path}')
 
 
@@ -289,6 +319,7 @@ class Checkpoint:
 
 def case_based_training(exp_configs: list[dict],
                         model_name: str) -> None:
+    _load_training_dependencies()
     
     logger = logging.getLogger(__name__)
     logger.info(f'START: case_based_training.')
@@ -344,6 +375,7 @@ def objective_function(trial: optuna.Trial,
                        model_name: str,
                        model_configs_list: list[dict],
                        checkpoint: object) -> float:
+    _load_training_dependencies()
     
     """
     Objective function for Optuna
@@ -454,6 +486,7 @@ def objective_function(trial: optuna.Trial,
 def optuna_based_training(exp_config: list[dict], # only one, non converted conf given in list
                           model_name: str,
                           n_trials: int = 100) -> None:
+    _load_training_dependencies()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     logger = logging.getLogger(__name__)
@@ -550,7 +583,7 @@ def argparser():
     )
 
     parser.add_argument(
-        '--model_name',
+        '--model-name',
         type=str,
         help=(
             "Base of the model's name.\n"
@@ -592,6 +625,7 @@ def argparser():
 def main():
     multiprocessing.set_start_method('spawn', force=True)
     args = argparser()
+    _load_training_dependencies()
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -640,11 +674,22 @@ def main():
 
         check_models(model_configs_paths=model_configs_paths_list, 
                      max_input_size=(1, 8192, 4), 
-                     max_memory_GB=20,
+                     max_memory_gb=20,
                      verbose=True)
 
         
 
+def _run_direct_entry_point() -> None:
+    project_root = str(pth.Path(__file__).resolve().parents[2])
+    sys.path.insert(0, project_root)
+    try:
+        runpy.run_module("src.model_pipeline.train_segm_automated", run_name="__main__")
+    finally:
+        sys.path.remove(project_root)
+
+
 if __name__ == '__main__':
-    
-    main()  
+    if __package__:
+        main()
+    else:
+        _run_direct_entry_point()

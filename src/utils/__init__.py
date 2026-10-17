@@ -1,5 +1,6 @@
-from .nn_utils import *
-from .pcd_manipulation import *
-from .knn_torch import *
-from .scaler import *
-from .plot_cloud import plot_cloud
+def __getattr__(name):
+    if name == "plot_cloud":
+        from .plot_cloud import plot_cloud
+
+        return plot_cloud
+    raise AttributeError(name)

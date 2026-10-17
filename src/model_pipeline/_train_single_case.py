@@ -1,30 +1,32 @@
 import torch
-from torchinfo import summary
 import torch.optim as optim
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
-from utils import EarlyStopping
 
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
-from RandLANet_CB import RandLANet
-
-from _data_loader import *
-
-src_dir = pth.Path(__file__).parent.parent
-sys.path.append(str(src_dir))
-
-from utils import compute_mIoU, calculate_accuracy
-from utils import compute_pos_weights_h5, get_dataset_len, FocalLoss
-from utils import wrap_hist
+if __package__:
+    from .randlanet_cb import Randlanet
+    from ._data_loader import Dataset
+    from ..utils.nn_utils import (
+        EarlyStopping, compute_miou, calculate_accuracy,
+        compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
+    )
+else:
+    from randlanet_cb import Randlanet
+    from _data_loader import Dataset
+    from utils.nn_utils import (
+        EarlyStopping, compute_miou, calculate_accuracy,
+        compute_pos_weights_h5, get_dataset_len, FocalLoss, wrap_hist,
+    )
 
 from tqdm import tqdm
 from typing import Union, Generator, Any
 from dataclasses import dataclass
 
 @dataclass
-class dummy_pruner:
+class DummyPruner:
     stop_training = False
 
     @staticmethod
@@ -47,7 +49,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                       shuffle=True,
                                       device=device_loader)
 
-    trainLoader = DataLoader(train_dataset,
+    train_loader = DataLoader(train_dataset,
                              batch_size=None,
                              num_workers = 15,
                              pin_memory=True)
@@ -61,13 +63,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                     shuffle=False,
                                     device=device_loader)
 
-    valLoader = DataLoader(val_dataset,
+    val_loader = DataLoader(val_dataset,
                              batch_size=None,
                              num_workers = 15,
                              pin_memory=True)
     
-    total_t = get_dataset_len(trainLoader)
-    total_v = get_dataset_len(valLoader)
+    total_t = get_dataset_len(train_loader)
+    total_v = get_dataset_len(val_loader)
     class_weights_t = compute_pos_weights_h5(h5_path=training_dict['data_path_train'],
                                              num_classes=training_dict['num_classes'],
                                         power=0.25)
@@ -76,13 +78,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                                         num_classes=training_dict['num_classes'],
                                         power=0.25)
     
-    early_stop = dummy_pruner()
+    early_stop = DummyPruner()
     # early_stop = EarlyStopping(patience=10, delta=0.001, mode="maximize", verbose=False)
 
     try:
 
         if training_dict['model'] is None:
-            model = RandLANet(model_config=training_dict['model_config'],
+            model = Randlanet(model_config=training_dict['model_config'],
                             n_classes=training_dict['num_classes'])
         else:
             model = training_dict['model']
@@ -150,7 +152,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 epoch_miou_v = 0.
 
 
-                progressbar_t = tqdm(trainLoader, 
+                progressbar_t = tqdm(train_loader, 
                                         desc=f"Epoch training {epoch+1}/ {training_dict['epochs']}", 
                                         total=total_t, 
                                         position=3,
@@ -199,7 +201,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 acc_hist.append(-1.)  # Not computed for training
                 miou_hist.append(-1.)  # Not computed for training
 
-                progressbar_v = tqdm(valLoader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
+                progressbar_v = tqdm(val_loader, desc=f"Epoch validation {epoch + 1}/ {training_dict['epochs']}", total=total_v, position=3, leave=False)
                 model.eval()
 
                 with torch.no_grad():
@@ -215,12 +217,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         accuracy_v = calculate_accuracy(outputs, batch_y)
 
-                        mIoU, _ = compute_mIoU(outputs, batch_y, training_dict['num_classes'])
+                        miou, _ = compute_miou(outputs, batch_y, training_dict['num_classes'])
 
 
                         epoch_loss_v += loss_v.item() * batch_y.size(0)
                         epoch_accuracy_v += accuracy_v * batch_y.size(0)
-                        epoch_miou_v += mIoU * batch_y.size(0)
+                        epoch_miou_v += miou * batch_y.size(0)
                         epoch_samples_v += batch_y.size(0)
 
                         avg_loss_v = epoch_loss_v / epoch_samples_v
