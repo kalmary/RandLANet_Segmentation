@@ -20,6 +20,7 @@ class CustomDataset(IterableDataset):
         max_seen: int = 1,
         steps_per_epoch: int | None = None,
         batches_per_file: int = 8,
+        class_aware_fraction: float = 0.5,
     ):
         self.files = sorted(Path(data_dir).glob("*.npy"))
         self.num_points = num_points
@@ -55,6 +56,9 @@ class CustomDataset(IterableDataset):
             None if steps_per_epoch is None else int(steps_per_epoch)
         )
         self.batches_per_file = int(batches_per_file)
+        if not np.isfinite(class_aware_fraction) or not 0 <= class_aware_fraction <= 1:
+            raise ValueError("class_aware_fraction must be within [0, 1]")
+        self.class_aware_fraction = float(class_aware_fraction)
 
         if not self.files:
             raise FileNotFoundError(f"No .npy files in {data_dir}")
@@ -166,6 +170,60 @@ class CustomDataset(IterableDataset):
         deltas = (1.0 - normalized) ** 2
         np.add.at(possibilities, neighbor_indices, deltas)
 
+    def _select_centers(
+        self,
+        possibilities,
+        seen,
+        targets,
+        labels,
+        rng,
+    ):
+        remaining = np.flatnonzero(seen < targets)
+        center_count = min(self.batch_size, remaining.size)
+        normalized_coverage = seen[remaining] / targets[remaining]
+        ranked = np.lexsort(
+            (possibilities[remaining], normalized_coverage),
+        )
+
+        if self.class_weights is None or self.class_aware_fraction == 0:
+            return remaining[ranked[:center_count]]
+
+        class_aware_count = min(
+            center_count - 1,
+            int(round(center_count * self.class_aware_fraction)),
+        )
+        natural_count = center_count - class_aware_count
+        natural_positions = ranked[:natural_count]
+        selected = remaining[natural_positions].tolist()
+        available = np.ones(remaining.size, dtype=bool)
+        available[natural_positions] = False
+
+        while len(selected) < center_count:
+            candidate_positions = np.flatnonzero(available)
+            candidates = remaining[candidate_positions]
+            present_classes = np.unique(labels[candidates])
+            probabilities = self.class_weights[present_classes].astype(
+                np.float64, copy=True
+            )
+            if probabilities.sum() == 0:
+                probabilities.fill(1.0)
+            probabilities /= probabilities.sum()
+            target_class = rng.choice(present_classes, p=probabilities)
+            class_positions = candidate_positions[
+                labels[candidates] == target_class
+            ]
+            class_candidates = remaining[class_positions]
+            class_coverage = seen[class_candidates] / targets[class_candidates]
+            class_ranked = np.lexsort(
+                (possibilities[class_candidates], class_coverage),
+            )
+            selected_position = int(class_positions[class_ranked[0]])
+            selected_index = int(remaining[selected_position])
+            selected.append(selected_index)
+            available[selected_position] = False
+
+        return np.asarray(selected, dtype=np.int64)
+
     def _iter_file(self, path, rng, max_batches: int | None = None):
         xyz, feats, labels, tree = self._load_file(path)
         possibilities = rng.random(len(xyz)) * 1e-3
@@ -185,13 +243,9 @@ class CustomDataset(IterableDataset):
 
         produced = 0
         while np.any(seen < targets):
-            remaining = np.flatnonzero(seen < targets)
-            center_count = min(self.batch_size, remaining.size)
-            normalized_coverage = seen[remaining] / targets[remaining]
-            ranked = np.lexsort(
-                (possibilities[remaining], normalized_coverage),
+            center_indices = self._select_centers(
+                possibilities, seen, targets, labels, rng
             )
-            center_indices = remaining[ranked[:center_count]]
             neighbor_indices, model_neighbor_indices = self._query_neighbors(
                 tree,
                 xyz,
@@ -292,6 +346,7 @@ def make_loader(
     max_seen: int = 1,
     steps_per_epoch: int | None = None,
     batches_per_file: int = 8,
+    class_aware_fraction: float = 0.5,
 ) -> tuple[DataLoader, CustomDataset]:
     dataset = CustomDataset(
         data_dir=data_dir,
@@ -304,6 +359,7 @@ def make_loader(
         max_seen=max_seen,
         steps_per_epoch=steps_per_epoch,
         batches_per_file=batches_per_file,
+        class_aware_fraction=class_aware_fraction,
     )
     loader = DataLoader(
         dataset,

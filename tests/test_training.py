@@ -60,16 +60,25 @@ def test_load_config_requires_cuda(tmp_path, monkeypatch):
         training.load_config(tmp_path, mode=1)
 
 
-def test_dataset_length_measurement_can_be_disabled(monkeypatch):
-    monkeypatch.setattr(
-        train_case,
-        "get_dataset_len",
-        lambda loader: pytest.fail("loader should not be iterated"),
-    )
+def test_epoch_lengths_have_practical_fixed_defaults():
+    assert train_case._configured_epoch_lengths({}) == (500, 100)
+    assert train_case._configured_epoch_lengths({
+        "train_steps_per_epoch": 12,
+        "validation_steps": 3,
+    }) == (12, 3)
 
-    totals = train_case._dataset_lengths(object(), object(), enabled=False)
 
-    assert totals == (None, None)
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"train_steps_per_epoch": 0},
+        {"validation_steps": -1},
+        {"train_steps_per_epoch": True},
+    ],
+)
+def test_epoch_lengths_must_be_positive_integers(config):
+    with pytest.raises(ValueError, match="positive integers"):
+        train_case._configured_epoch_lengths(config)
 
 
 def test_unknown_dataset_length_uses_plateau_scheduler():
@@ -125,7 +134,6 @@ def test_repeats_are_independent_and_use_updated_loader_api(
     use_provided_model,
 ):
     loader_calls = []
-    length_calls = []
     weight_calls = []
     loss_instances = []
     created_models = []
@@ -140,10 +148,6 @@ def test_repeats_are_independent_and_use_updated_loader_api(
         loader_calls.append(kwargs)
         loader = train_loader if kwargs["shuffle"] else val_loader
         return loader, object()
-
-    def get_dataset_len(loader):
-        length_calls.append(loader)
-        return len(loader)
 
     def compute_weights(data_dir, num_classes, power):
         weight_calls.append((data_dir, num_classes, power))
@@ -176,7 +180,6 @@ def test_repeats_are_independent_and_use_updated_loader_api(
         return scheduler
 
     monkeypatch.setattr(train_case, "make_loader", make_loader)
-    monkeypatch.setattr(train_case, "get_dataset_len", get_dataset_len)
     monkeypatch.setattr(train_case, "compute_pos_weights_cloud", compute_weights)
     monkeypatch.setattr(train_case, "FocalLoss", TrackingFocalLoss)
     monkeypatch.setattr(train_case, "RandLANet", make_model)
@@ -220,8 +223,8 @@ def test_repeats_are_independent_and_use_updated_loader_api(
     assert optimizers[0].param_groups[0]["params"][0] is next(models[0].parameters())
     assert optimizers[1].param_groups[0]["params"][0] is next(models[1].parameters())
     assert [call[:2] for call in scheduler_calls] == [
-        (optimizers[0], None),
-        (optimizers[1], None),
+        (optimizers[0], 500),
+        (optimizers[1], 500),
     ]
 
     assert len(loss_instances) == 4
@@ -234,7 +237,10 @@ def test_repeats_are_independent_and_use_updated_loader_api(
 
     assert loader_calls[0]["data_dir"] == "train-data"
     assert loader_calls[0]["shuffle"] is True
-    assert loader_calls[0]["max_seen"] == 10
+    assert loader_calls[0]["max_seen"] == 3
+    assert loader_calls[0]["steps_per_epoch"] == 500
+    assert loader_calls[0]["batches_per_file"] == 8
+    assert loader_calls[0]["class_aware_fraction"] == 0.5
     assert loader_calls[0]["class_weights"].tolist() == [1.0, 2.0]
     assert loader_calls[1] == {
         "data_dir": "val-data",
@@ -243,8 +249,10 @@ def test_repeats_are_independent_and_use_updated_loader_api(
         "query_workers": 0,
         "shuffle": False,
         "max_seen": 1,
+        "steps_per_epoch": 100,
+        "batches_per_file": 8,
+        "class_aware_fraction": 0.0,
     }
-    assert length_calls == []
     assert all(
         history["acc_v_hist"][0] in {0.0, 1.0}
         for history in histories

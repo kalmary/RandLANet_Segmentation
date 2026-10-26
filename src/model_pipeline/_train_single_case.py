@@ -14,7 +14,7 @@ from RandLANet_CB import RandLANet
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from utils import get_dataset_len, FocalLoss
+from utils import FocalLoss
 from utils import wrap_hist
 
 from tqdm import tqdm
@@ -68,17 +68,21 @@ def _labeled_outputs(
     return flattened_outputs[valid], flattened_labels[valid]
 
 
-def _dataset_lengths(train_loader, val_loader, enabled: bool):
-    if not enabled:
-        return None, None
-
-    total_t = get_dataset_len(train_loader)
-    total_v = get_dataset_len(val_loader)
-    if total_t == 0:
-        raise RuntimeError("Training dataset produced no batches")
-    if total_v == 0:
-        raise RuntimeError("Validation dataset produced no batches")
-    return total_t, total_v
+def _configured_epoch_lengths(training_dict: dict) -> tuple[int, int]:
+    totals = (
+        training_dict.get('train_steps_per_epoch', 500),
+        training_dict.get('validation_steps', 100),
+    )
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        for value in totals
+    ):
+        raise ValueError(
+            "train_steps_per_epoch and validation_steps must be positive integers"
+        )
+    return totals
 
 
 def _build_scheduler(optimizer, training_dict: dict, total_t: int | None):
@@ -116,6 +120,12 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
         )
 
 
+        total_t, total_v = _configured_epoch_lengths(training_dict)
+        batches_per_file = training_dict.get('batches_per_file', 8)
+        class_aware_fraction = training_dict.get(
+            'class_aware_center_fraction', 0.5
+        )
+
         trainLoader, _ = make_loader(
             data_dir=training_dict['data_path_train'],
             num_points=training_dict['num_points'],
@@ -123,7 +133,10 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             query_workers=training_dict.get('query_workers', 7),
             shuffle=True,
             class_weights=class_weights_t.numpy(),
-            max_seen=training_dict.get('max_seen', 10),
+            max_seen=training_dict.get('max_seen', 3),
+            steps_per_epoch=total_t,
+            batches_per_file=batches_per_file,
+            class_aware_fraction=class_aware_fraction,
         )
 
         valLoader, _ = make_loader(
@@ -133,12 +146,9 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             query_workers=training_dict.get('query_workers', 7),
             shuffle=False,
             max_seen=1,
-        )
-
-        total_t, total_v = _dataset_lengths(
-            trainLoader,
-            valLoader,
-            enabled=False,
+            steps_per_epoch=total_v,
+            batches_per_file=batches_per_file,
+            class_aware_fraction=0.0,
         )
 
         repeat_pbar = tqdm(range(training_dict['train_repeat']), 
