@@ -1,6 +1,6 @@
 {   
-    "train_repeat": 4,
-    "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
+    "train_repeat": 1,
+    "train_repeat_comment": "One full run for practical single-config training",
 
     "data_path_train": "/mnt/data-ssd/DALES/dataset_prob/train",
     "data_path_test": "/mnt/data-ssd/DALES/dataset_prob/test",
