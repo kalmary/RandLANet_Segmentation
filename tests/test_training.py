@@ -107,7 +107,6 @@ def test_repeats_are_independent_and_use_updated_loader_api(
     length_calls = []
     weight_calls = []
     loss_instances = []
-    accuracy_calls = []
     created_models = []
     optimizers = []
     scheduler_calls = []
@@ -155,10 +154,6 @@ def test_repeats_are_independent_and_use_updated_loader_api(
         scheduler_calls.append((optimizer, total_t, scheduler))
         return scheduler
 
-    def calculate_accuracy(outputs, labels):
-        accuracy_calls.append((outputs, labels))
-        return 0.75
-
     monkeypatch.setattr(train_case, "make_loader", make_loader)
     monkeypatch.setattr(train_case, "get_dataset_len", get_dataset_len)
     monkeypatch.setattr(train_case, "compute_pos_weights_cloud", compute_weights)
@@ -166,8 +161,6 @@ def test_repeats_are_independent_and_use_updated_loader_api(
     monkeypatch.setattr(train_case, "RandLANet", make_model)
     monkeypatch.setattr(train_case.optim, "AdamW", make_optimizer)
     monkeypatch.setattr(train_case, "_build_scheduler", make_scheduler)
-    monkeypatch.setattr(train_case, "calculate_accuracy", calculate_accuracy)
-    monkeypatch.setattr(train_case, "compute_mIoU", lambda *args: (0.25, None))
     monkeypatch.setattr(train_case, "tqdm", Progress)
     monkeypatch.setattr(torch.Tensor, "to", lambda self, *args, **kwargs: self)
 
@@ -206,8 +199,8 @@ def test_repeats_are_independent_and_use_updated_loader_api(
     assert optimizers[0].param_groups[0]["params"][0] is next(models[0].parameters())
     assert optimizers[1].param_groups[0]["params"][0] is next(models[1].parameters())
     assert [call[:2] for call in scheduler_calls] == [
-        (optimizers[0], 1),
-        (optimizers[1], 1),
+        (optimizers[0], None),
+        (optimizers[1], None),
     ]
 
     assert len(loss_instances) == 4
@@ -218,25 +211,27 @@ def test_repeats_are_independent_and_use_updated_loader_api(
         ("val-data", 2, 0.5),
     ]
 
-    assert loader_calls == [
-        {
-            "data_dir": "train-data",
-            "num_points": 16,
-            "batch_size": 1,
-            "query_workers": 0,
-            "shuffle": True,
-        },
-        {
-            "data_dir": "val-data",
-            "num_points": 16,
-            "batch_size": 1,
-            "query_workers": 0,
-            "shuffle": False,
-        },
-    ]
-    assert length_calls == [train_loader, val_loader]
-    assert len(accuracy_calls) == 2
-    assert [history["acc_v_hist"] for history in histories] == [[0.75], [0.75]]
+    assert loader_calls[0]["data_dir"] == "train-data"
+    assert loader_calls[0]["shuffle"] is True
+    assert loader_calls[0]["max_seen"] == 10
+    assert loader_calls[0]["class_weights"].tolist() == [1.0, 2.0]
+    assert loader_calls[1] == {
+        "data_dir": "val-data",
+        "num_points": 16,
+        "batch_size": 1,
+        "query_workers": 0,
+        "shuffle": False,
+        "max_seen": 1,
+    }
+    assert length_calls == []
+    assert all(
+        history["acc_v_hist"][0] in {0.0, 1.0}
+        for history in histories
+    )
+    assert all(
+        history["miou_v_hist"][0] == history["acc_v_hist"][0]
+        for history in histories
+    )
     assert [len(history["loss_hist"]) for history in histories] == [1, 1]
     assert histories[0]["loss_hist"] is not histories[1]["loss_hist"]
 

@@ -21,6 +21,6 @@
     },
     "fc_end": {
         "layers": [64, 32],
-        "dropout": 0.5
+        "dropout_probability": 0.5
     }
 }
