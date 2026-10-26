@@ -15,13 +15,14 @@ from typing import Union
 
 def input_norm(input: torch.Tensor) -> torch.Tensor:
     """
-    input: (B, N, 4) — xyz relative to sphere center + intensity [0,1]
-    xyz:       divide by per-sample maximum Euclidean radius
-    intensity: subtract 0.5 → [-0.5, 0.5]
+    Normalize non-spatial features without destroying metric geometry.
+
+    XYZ has already been translated to the crop center by the data pipeline.
+    Keeping it in metres preserves the physical scale used by the neighborhood
+    encoder. Intensity is centered around zero while retaining its [0, 1]
+    normalization from preprocessing.
     """
     input = input.clone()
-    r_max = torch.linalg.vector_norm(input[..., :3], dim=-1).amax(dim=1, keepdim=True)
-    input[..., :3] = input[..., :3] / r_max.unsqueeze(-1).clamp_min(1e-6)
     input[..., 3] = input[..., 3] - 0.5
     return input
 
@@ -64,10 +65,10 @@ class LocalSpatialEncoding(nn.Module):
         relative_pos  = center_coords - neighbors
 
         concat = torch.cat([
-            center_coords.expand(-1, -1, -1, K),
+            dist.unsqueeze(1),
             relative_pos,
+            center_coords.expand(-1, -1, -1, K),
             neighbors,
-            dist.unsqueeze(1)
         ], dim=1)
 
         encoded = self.mlp(concat)
@@ -97,14 +98,14 @@ class LocalFeatureAggregation(nn.Module):
     def __init__(self, d_in, d_out, num_neighbors):
         super().__init__()
         self.num_neighbors = num_neighbors
-        self.mlp1     = SharedMLP(d_in,   d_out//2, activation_fn=nn.ReLU())
-        self.mlp2     = SharedMLP(d_out,  2*d_out)
-        self.shortcut = SharedMLP(d_in,   2*d_out,  bn=True, activation_fn=nn.ReLU())
+        self.mlp1     = SharedMLP(d_in,   d_out//2, bn=True, activation_fn=nn.ReLU())
+        self.mlp2     = SharedMLP(d_out,  2*d_out, bn=True)
+        self.shortcut = SharedMLP(d_in,   2*d_out, bn=True)
         self.lse1     = LocalSpatialEncoding(d_out//2, num_neighbors)
         self.lse2     = LocalSpatialEncoding(d_out//2, num_neighbors)
         self.pool1    = AttentivePooling(d_out, d_out//2)
         self.pool2    = AttentivePooling(d_out, d_out)
-        self.relu     = nn.ReLU()
+        self.activation = nn.LeakyReLU(negative_slope=0.2)
 
     def forward(self, coords_idx, knn_query: KNNCache, features):
         knn_output = knn_query.query(coords_idx, coords_idx, self.num_neighbors)
@@ -112,7 +113,7 @@ class LocalFeatureAggregation(nn.Module):
         x = self.mlp1(features)
         x = self.pool1(self.lse1(coords, x, knn_output))
         x = self.pool2(self.lse2(coords, x, knn_output))
-        x = self.relu(self.mlp2(x) + self.shortcut(features))
+        x = self.activation(self.mlp2(x) + self.shortcut(features))
         return x, knn_output[0]
 
 
@@ -122,7 +123,7 @@ class RandLANet(nn.Module):
 
         d_in                         = model_config['d_in']
         self.num_neighbors           = model_config['num_neighbors']
-        self._num_neighbors_upsample = 3
+        self._num_neighbors_upsample = 1
         self.decimation              = model_config['decimation']
         self.KNN                     = KNNCache()
 
@@ -132,7 +133,12 @@ class RandLANet(nn.Module):
         fc_end_config   = model_config.get('fc_end',   {'layers': [64, 32], 'dropout': 0.5})
 
         fc_start_d_out = fc_start_config.get('d_out', 8)
-        self.fc_start  = SharedMLP(d_in, fc_start_d_out, bn=True, activation_fn=nn.ReLU())
+        self.fc_start  = SharedMLP(
+            d_in,
+            fc_start_d_out,
+            bn=True,
+            activation_fn=nn.LeakyReLU(negative_slope=0.2),
+        )
 
         self.encoder = nn.ModuleList([
             LocalFeatureAggregation(l['d_in'], l['d_out'], self.num_neighbors)
@@ -140,7 +146,12 @@ class RandLANet(nn.Module):
         ])
 
         mlp_dim  = 2 * encoder_layers[-1]['d_out']
-        self.mlp = SharedMLP(mlp_dim, mlp_dim, activation_fn=nn.ReLU())
+        self.mlp = SharedMLP(
+            mlp_dim,
+            mlp_dim,
+            bn=True,
+            activation_fn=nn.ReLU(),
+        )
 
         self.decoder = nn.ModuleList([
             SharedMLP(l['d_in'], l['d_out'], transpose=True, bn=True, activation_fn=nn.ReLU())
@@ -151,7 +162,10 @@ class RandLANet(nn.Module):
 
         # fc_end → n_classes
         fc_end_layers  = fc_end_config.get('layers',  [64, 32])
-        fc_end_dropout = fc_end_config.get('dropout', 0.5)
+        fc_end_dropout = fc_end_config.get(
+            'dropout_probability',
+            fc_end_config.get('dropout', 0.5),
+        )
         current_d      = decoder_layers[-1]['d_out']
         fc_end_modules = []
 
@@ -181,9 +195,16 @@ class RandLANet(nn.Module):
 
         input = input_norm(input)
 
-        if self.training:
-            permutation = torch.randperm(N, device=input.device)
-            input = input[:, permutation]
+        batch_size = input.shape[0]
+        permutation = torch.argsort(
+            torch.rand(batch_size, N, device=input.device),
+            dim=1,
+        )
+        batch_indices = torch.arange(
+            batch_size,
+            device=input.device,
+        ).unsqueeze(1)
+        input = input[batch_indices, permutation]
 
         coords = input[..., :3]
         self.KNN.build(coords)
@@ -241,8 +262,12 @@ class RandLANet(nn.Module):
 
         out = self.fc_end(x).squeeze(-1)  # (B, n_classes, N)
 
-        if self.training:
-            out = out[:, :, torch.argsort(permutation)]
+        inverse_permutation = torch.argsort(permutation, dim=1)
+        out = torch.gather(
+            out,
+            2,
+            inverse_permutation.unsqueeze(1).expand(-1, out.shape[1], -1),
+        )
 
         return out
 

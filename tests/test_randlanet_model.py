@@ -9,7 +9,13 @@ import torch.nn as nn
 project_root = pathlib.Path(__file__).resolve().parents[1]
 sys.path.append(str(project_root))
 
-from src.model_pipeline.RandLANet_CB import LocalSpatialEncoding, RandLANet, input_norm
+from src.model_pipeline.RandLANet_CB import (
+    LocalFeatureAggregation,
+    LocalSpatialEncoding,
+    RandLANet,
+    input_norm,
+)
+from src.model_pipeline.RandLANet_CB_pooled import RandLANet as PooledRandLANet
 
 
 class ZeroSpatialEncoding(nn.Module):
@@ -45,7 +51,7 @@ def test_local_spatial_encoding_gathers_neighbor_features_from_knn_indices(
     torch.testing.assert_close(output[:, 2:], expected_neighbors)
 
 
-def test_input_norm_uses_one_maximum_radius_per_sample():
+def test_input_norm_preserves_metric_xyz_and_centers_intensity():
     inputs = torch.tensor(
         [
             [[3.0, 0.0, 0.0, 1.0], [0.0, 4.0, 0.0, 0.0]],
@@ -55,21 +61,26 @@ def test_input_norm_uses_one_maximum_radius_per_sample():
 
     normalized = input_norm(inputs)
 
-    expected_xyz = torch.tensor(
-        [
-            [[0.75, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            [[1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0], [0.0, 0.0, 0.0]],
-        ]
-    )
-    torch.testing.assert_close(normalized[..., :3], expected_xyz)
-    torch.testing.assert_close(
-        torch.linalg.vector_norm(normalized[..., :3], dim=-1).amax(dim=1),
-        torch.ones(2),
-    )
+    torch.testing.assert_close(normalized[..., :3], inputs[..., :3])
     torch.testing.assert_close(
         normalized[..., 3],
         torch.tensor([[0.5, -0.5], [0.25, -0.25]]),
     )
+
+
+def test_residual_block_matches_randlanet_normalization_and_activation():
+    block = LocalFeatureAggregation(d_in=8, d_out=16, num_neighbors=4)
+
+    assert block.mlp1.batch_norm is not None
+    assert block.mlp2.batch_norm is not None
+    assert block.shortcut.batch_norm is not None
+    assert block.shortcut.activation_fn is None
+    assert isinstance(block.activation, nn.LeakyReLU)
+    assert block.activation.negative_slope == pytest.approx(0.2)
+
+
+def test_pooled_module_uses_canonical_model():
+    assert PooledRandLANet is RandLANet
 
 
 def test_neighborhood_max_pooling_and_model_output_shapes():
