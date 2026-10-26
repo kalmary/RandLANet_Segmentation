@@ -1,5 +1,5 @@
 {   
-    "train_repeat": 4,
+    "train_repeat": 1,
     "train_repeat_comment": "How many times training is done for the same config, to get average/ best results",
 
     "data_path_train": "/mnt/data-ssd/BRIK/SEMANTIC_SEGM/prob/split/train",
