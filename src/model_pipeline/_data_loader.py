@@ -18,6 +18,8 @@ class CustomDataset(IterableDataset):
         epoch: int = 0,
         class_weights=None,
         max_seen: int = 1,
+        steps_per_epoch: int | None = None,
+        batches_per_file: int = 8,
     ):
         self.files = sorted(Path(data_dir).glob("*.npy"))
         self.num_points = num_points
@@ -37,6 +39,22 @@ class CustomDataset(IterableDataset):
         if isinstance(max_seen, (bool, np.bool_)) or not 1 <= max_seen <= 127:
             raise ValueError("max_seen must be an integer within [1, 127]")
         self.max_seen = int(max_seen)
+        if steps_per_epoch is not None and (
+            isinstance(steps_per_epoch, (bool, np.bool_))
+            or not isinstance(steps_per_epoch, (int, np.integer))
+            or steps_per_epoch < 1
+        ):
+            raise ValueError("steps_per_epoch must be a positive integer")
+        if (
+            isinstance(batches_per_file, (bool, np.bool_))
+            or not isinstance(batches_per_file, (int, np.integer))
+            or batches_per_file < 1
+        ):
+            raise ValueError("batches_per_file must be a positive integer")
+        self.steps_per_epoch = (
+            None if steps_per_epoch is None else int(steps_per_epoch)
+        )
+        self.batches_per_file = int(batches_per_file)
 
         if not self.files:
             raise FileNotFoundError(f"No .npy files in {data_dir}")
@@ -56,6 +74,13 @@ class CustomDataset(IterableDataset):
             raise FileNotFoundError(
                 f"Missing matching .pkl trees for: {missing[:3]}"
             )
+
+        self._scan_tiles: dict[str, list[int]] = {}
+        for file_index, path in enumerate(self.files):
+            scan_name, separator, _ = path.stem.rpartition("_tile_")
+            key = scan_name if separator else path.stem
+            self._scan_tiles.setdefault(key, []).append(file_index)
+        self._scan_cursors = {key: 0 for key in self._scan_tiles}
 
 
     def _load_file(self, path):
@@ -141,7 +166,7 @@ class CustomDataset(IterableDataset):
         deltas = (1.0 - normalized) ** 2
         np.add.at(possibilities, neighbor_indices, deltas)
 
-    def _iter_file(self, path, rng):
+    def _iter_file(self, path, rng, max_batches: int | None = None):
         xyz, feats, labels, tree = self._load_file(path)
         possibilities = rng.random(len(xyz)) * 1e-3
         valid = labels >= 0
@@ -158,6 +183,7 @@ class CustomDataset(IterableDataset):
             targets[valid] = class_targets[labels[valid]]
         seen = np.zeros(len(xyz), dtype=np.int16)
 
+        produced = 0
         while np.any(seen < targets):
             remaining = np.flatnonzero(seen < targets)
             center_count = min(self.batch_size, remaining.size)
@@ -193,8 +219,27 @@ class CustomDataset(IterableDataset):
                 torch.from_numpy(batch),
                 torch.from_numpy(batch_labels),
             )
+            produced += 1
+            if max_batches is not None and produced >= max_batches:
+                break
 
         return seen >= targets
+
+    def _balanced_file_indices(self, rng):
+        """Yield files with equal scan frequency and rotating tiles."""
+        scan_names = sorted(self._scan_tiles)
+        local_cursors = {key: 0 for key in scan_names}
+        while True:
+            scan_order = np.arange(len(scan_names))
+            if self.shuffle:
+                rng.shuffle(scan_order)
+            for scan_position in scan_order:
+                scan_name = scan_names[scan_position]
+                tiles = self._scan_tiles[scan_name]
+                cursors = self._scan_cursors if self.shuffle else local_cursors
+                cursor = cursors[scan_name]
+                yield tiles[cursor]
+                cursors[scan_name] = (cursor + 1) % len(tiles)
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -204,11 +249,30 @@ class CustomDataset(IterableDataset):
                 "query_workers controls parallel cKDTree queries"
             )
 
-        if worker_info is None:
-            rng = np.random.default_rng(self._epoch)
+        if self.shuffle:
+            base_seed = self._epoch
+            if worker_info is not None:
+                base_seed += worker_info.seed
+            rng = np.random.default_rng(base_seed)
             self._epoch += 1
         else:
-            rng = np.random.default_rng(worker_info.seed)
+            # Validation must use exactly the same crops each epoch so that
+            # checkpoint comparisons are not dominated by sampler noise.
+            rng = np.random.default_rng(0)
+
+        if self.steps_per_epoch is not None:
+            produced = 0
+            for file_idx in self._balanced_file_indices(rng):
+                remaining = self.steps_per_epoch - produced
+                file_budget = min(self.batches_per_file, remaining)
+                for batch in self._iter_file(
+                    self.files[file_idx], rng, max_batches=file_budget
+                ):
+                    yield batch
+                    produced += 1
+                    if produced >= self.steps_per_epoch:
+                        return
+
         order = np.arange(len(self.files))
         if self.shuffle:
             rng.shuffle(order)
@@ -226,6 +290,8 @@ def make_loader(
     epoch: int = 0,
     class_weights=None,
     max_seen: int = 1,
+    steps_per_epoch: int | None = None,
+    batches_per_file: int = 8,
 ) -> tuple[DataLoader, CustomDataset]:
     dataset = CustomDataset(
         data_dir=data_dir,
@@ -236,12 +302,14 @@ def make_loader(
         epoch=epoch,
         class_weights=class_weights,
         max_seen=max_seen,
+        steps_per_epoch=steps_per_epoch,
+        batches_per_file=batches_per_file,
     )
     loader = DataLoader(
         dataset,
         batch_size=None,
         num_workers=1,
-        persistent_workers=False,
+        persistent_workers=True,
         prefetch_factor=2,
         pin_memory=False,
         multiprocessing_context="spawn",
