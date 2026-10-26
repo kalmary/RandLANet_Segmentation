@@ -86,6 +86,26 @@ def test_legacy_preprocessing_can_still_drop_unclassified(monkeypatch):
     np.testing.assert_array_equal(labels, [0])
 
 
+def test_tiling_keeps_small_single_class_tiles(monkeypatch):
+    xyz = np.array(
+        [[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [1.0, 0.5, 0.0]],
+        dtype=np.float32,
+    )
+    feats = np.ones((3, 1), dtype=np.float32)
+    labels = np.zeros(3, dtype=np.int32)
+    monkeypatch.setattr(downsample_LAZ.tqdm, "write", lambda *args, **kwargs: None)
+
+    tiles = list(
+        downsample_LAZ.iter_tiles(
+            xyz, feats, labels, tile_size=2.0, overlap=0.0
+        )
+    )
+
+    assert len(tiles) == 1
+    assert len(tiles[0][0]) == 3
+    np.testing.assert_array_equal(tiles[0][2], labels)
+
+
 def test_save_tiles_creates_distinct_paired_artifacts(tmp_path, save_tile, point_cloud):
     xyz, feats, labels = point_cloud
     output_dir = tmp_path / "cut"
