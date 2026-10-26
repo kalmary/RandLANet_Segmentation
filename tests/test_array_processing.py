@@ -33,6 +33,12 @@ def test_segmenter_loads_config_and_checkpoint_from_separate_directories(
             'num_points': 16,
             'batch_size': 2,
             'num_classes': 3,
+            'voxel_size': 0.25,
+            'tile_size': 60.0,
+            'overlap': 7.5,
+            'num_votes': 5,
+            'query_workers': 2,
+            'intensity_normalization': 'linear_max',
         }
 
     def load_model(self, path):
@@ -53,7 +59,35 @@ def test_segmenter_loads_config_and_checkpoint_from_separate_directories(
         'model_dir': model_dir,
     }
     assert instance.config['num_classes'] == 3
-    assert instance.num_votes == 3
+    assert instance.voxel_size == 0.25
+    assert instance.tile_size == 60.0
+    assert instance.overlap == 7.5
+    assert instance.num_votes == 5
+    assert instance.query_workers == 2
+
+
+def test_explicit_inference_settings_override_saved_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        array_processing.SegmentClass,
+        '_load_config',
+        lambda *_: {
+            'model_config': {}, 'num_points': 16, 'batch_size': 2,
+            'num_classes': 3, 'tile_size': 60.0,
+        },
+    )
+    monkeypatch.setattr(
+        array_processing.SegmentClass,
+        '_load_model',
+        lambda *_: IntensityModel(),
+    )
+
+    instance = array_processing.SegmentClass(
+        model_name='model_1', config_dir=tmp_path,
+        tile_size=25.0, num_votes=2,
+    )
+
+    assert instance.tile_size == 25.0
+    assert instance.num_votes == 2
 
 
 @pytest.mark.parametrize('num_votes', [0, -1, 1.5, True])

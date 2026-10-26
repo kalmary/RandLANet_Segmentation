@@ -24,37 +24,21 @@ class SegmentClass:
         config_dir: Union[str, Path] = "final_files",
         model_dir: Union[str, Path, None] = None,
         device: Union[str, torch.device] = torch.device("cpu"),
-        voxel_size: float = 0.10,
-        tile_size: float = 40.0,
-        overlap: float = 5.0,
-        num_votes: int = 3,
-        query_workers: int = -1,
+        voxel_size: float | None = None,
+        tile_size: float | None = None,
+        overlap: float | None = None,
+        num_votes: int | None = None,
+        query_workers: int | None = None,
         pbar_bool: bool = False,
     ):
         if not model_name:
             raise ValueError("model_name cannot be empty")
-        if voxel_size <= 0:
-            raise ValueError("voxel_size must be positive")
-        if tile_size <= 0:
-            raise ValueError("tile_size must be positive")
-        if overlap < 0:
-            raise ValueError("overlap cannot be negative")
-        if (
-            isinstance(num_votes, (bool, np.bool_))
-            or not isinstance(num_votes, (int, np.integer))
-            or num_votes < 1
-        ):
-            raise ValueError("num_votes must be a positive integer")
-        if query_workers == 0 or query_workers < -1:
-            raise ValueError("query_workers must be -1 or a positive integer")
+        self._validate_optional_settings(
+            voxel_size, tile_size, overlap, num_votes, query_workers,
+        )
 
         self.model_name = model_name.removesuffix(".pt")
         self.device = torch.device(device)
-        self.voxel_size = float(voxel_size)
-        self.tile_size = float(tile_size)
-        self.overlap = float(overlap)
-        self.num_votes = int(num_votes)
-        self.query_workers = int(query_workers)
         self.pbar_bool = pbar_bool
         self._rng = np.random.default_rng()
 
@@ -69,6 +53,28 @@ class SegmentClass:
 
         self._config = self._load_config(config_dir)
         self._model_config = self._config["model_config"]
+        self.voxel_size = float(self._setting(voxel_size, "voxel_size", 0.10))
+        self.tile_size = float(self._setting(tile_size, "tile_size", 40.0))
+        self.overlap = float(self._setting(overlap, "overlap", 5.0))
+        self.num_votes = int(self._setting(num_votes, "num_votes", 3))
+        self.query_workers = int(
+            self._setting(query_workers, "query_workers", -1)
+        )
+        self._validate_optional_settings(
+            self.voxel_size,
+            self.tile_size,
+            self.overlap,
+            self.num_votes,
+            self.query_workers,
+        )
+        normalization = self._config.get(
+            "intensity_normalization", "linear_max"
+        )
+        if normalization != "linear_max":
+            raise ValueError(
+                "Unsupported intensity_normalization in model config: "
+                f"{normalization!r}"
+            )
         self.num_points = int(self._config["num_points"])
         self.batch_size = int(self._config["batch_size"])
         self.n_classes = int(self._config["num_classes"])
@@ -84,6 +90,40 @@ class SegmentClass:
             raise ValueError("tile overlap count must fit in int8")
 
         self._model = self._load_model(model_dir)
+
+    @staticmethod
+    def _validate_optional_settings(
+        voxel_size,
+        tile_size,
+        overlap,
+        num_votes,
+        query_workers,
+    ) -> None:
+        if voxel_size is not None and voxel_size <= 0:
+            raise ValueError("voxel_size must be positive")
+        if tile_size is not None and tile_size <= 0:
+            raise ValueError("tile_size must be positive")
+        if overlap is not None and overlap < 0:
+            raise ValueError("overlap cannot be negative")
+        if num_votes is not None and (
+            isinstance(num_votes, (bool, np.bool_))
+            or not isinstance(num_votes, (int, np.integer))
+            or num_votes < 1
+        ):
+            raise ValueError("num_votes must be a positive integer")
+        if query_workers is not None and (
+            isinstance(query_workers, (bool, np.bool_))
+            or not isinstance(query_workers, (int, np.integer))
+            or query_workers == 0
+            or query_workers < -1
+        ):
+            raise ValueError("query_workers must be -1 or a positive integer")
+
+    def _setting(self, explicit, name: str, fallback):
+        if explicit is not None:
+            return explicit
+        preprocessing = self._config.get("preprocessing", {})
+        return preprocessing.get(name, self._config.get(name, fallback))
 
     def _load_config(self, config_dir: Path) -> dict:
         config_path = config_dir / f"{self.model_name}_config.json"
