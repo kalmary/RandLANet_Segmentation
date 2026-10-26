@@ -78,11 +78,6 @@ class CustomDataset(IterableDataset):
                 f"Point/tree size mismatch for {path.name}: "
                 f"{len(xyz)} points, {tree.n} tree entries"
             )
-        if len(xyz) < self.num_points:
-            raise ValueError(
-                f"{path.name} contains {len(xyz)} points, "
-                f"but num_points is {self.num_points}"
-            )
         if labels.size and labels.min() < -1:
             raise ValueError(f"Labels below ignore label -1 found in {path}")
         if (
@@ -96,15 +91,18 @@ class CustomDataset(IterableDataset):
 
 
     def _query_neighbors(self, tree, xyz, center_indices):
+        neighbor_count = min(self.num_points, len(xyz))
         centers = xyz[center_indices]
         _, queried = tree.query(
             centers,
-            k=self.num_points,
+            k=neighbor_count,
             workers=self.query_workers,
         )
 
         queried = np.asarray(queried, dtype=np.int64)
-        if queried.ndim == 1:
+        if neighbor_count == 1:
+            queried = queried.reshape(-1, 1)
+        elif queried.ndim == 1:
             queried = queried[None, :]
 
         neighbors = np.empty_like(queried)
@@ -112,9 +110,13 @@ class CustomDataset(IterableDataset):
 
         for row, center_idx in enumerate(center_indices):
             other = queried[row][queried[row] != center_idx]
-            neighbors[row, 1:] = other[:self.num_points - 1]
+            neighbors[row, 1:] = other[:neighbor_count - 1]
 
-        return neighbors
+        if neighbor_count == self.num_points:
+            return neighbors, neighbors
+        repeats = int(np.ceil(self.num_points / neighbor_count))
+        model_neighbors = np.tile(neighbors, (1, repeats))[:, :self.num_points]
+        return neighbors, model_neighbors
 
     @staticmethod
     def _update_possibilities(
@@ -164,7 +166,7 @@ class CustomDataset(IterableDataset):
                 (possibilities[remaining], normalized_coverage),
             )
             center_indices = remaining[ranked[:center_count]]
-            neighbor_indices = self._query_neighbors(
+            neighbor_indices, model_neighbor_indices = self._query_neighbors(
                 tree,
                 xyz,
                 center_indices,
@@ -179,10 +181,10 @@ class CustomDataset(IterableDataset):
             np.minimum(seen, 127, out=seen)
 
             centers = xyz[center_indices, None, :]
-            batch_xyz = xyz[neighbor_indices] - centers
-            batch_feats = feats[neighbor_indices]
+            batch_xyz = xyz[model_neighbor_indices] - centers
+            batch_feats = feats[model_neighbor_indices]
             batch = np.concatenate((batch_xyz, batch_feats), axis=2)
-            batch_labels = labels[neighbor_indices].astype(
+            batch_labels = labels[model_neighbor_indices].astype(
                 np.int64,
                 copy=False,
             )

@@ -241,6 +241,26 @@ def test_ignored_points_are_context_but_never_crop_centers(
     assert any(np.any(labels.numpy() == -1) for _, labels in batches)
 
 
+def test_tiles_smaller_than_crop_are_repeated_at_model_input(tmp_path):
+    xyz = np.arange(15, dtype=np.float32).reshape(5, 3)
+    data = np.column_stack(
+        (xyz, np.ones(5, dtype=np.float32), np.arange(5) % 2)
+    ).astype(np.float32)
+    path = tmp_path / "small_tile.npy"
+    np.save(path, data)
+    with path.with_suffix(".pkl").open("wb") as file:
+        pickle.dump(cKDTree(xyz), file)
+    dataset = _data_loader.CustomDataset(
+        tmp_path, num_points=8, batch_size=2, query_workers=1,
+        shuffle=False,
+    )
+
+    batches = list(dataset._iter_file(path, np.random.default_rng(0)))
+
+    assert batches
+    assert all(batch.shape[1:] == (8, 4) for batch, _ in batches)
+
+
 @pytest.mark.parametrize("max_seen", [0, 128, True])
 def test_max_seen_must_fit_coverage_counter(tmp_path, save_tile, max_seen):
     save_tile(tmp_path)

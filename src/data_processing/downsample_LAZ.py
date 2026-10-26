@@ -103,8 +103,6 @@ def voxel_subsample_vectorized(xyz, feats, labels, voxel_size=0.10):
 # ------------------------------------------------------------------
 # 3. Tile splitting
 # ------------------------------------------------------------------
-SKIP_CLASSES = {1, 7} # original 2, 8, after noise removal 1, 7
-
 def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
     mins     = xyz[:, :2].min(0)
     maxs     = xyz[:, :2].max(0)
@@ -120,24 +118,17 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
                     (xyz[:, 0] >= x0 - overlap) & (xyz[:, 0] < x0 + tile_size + overlap) &
                     (xyz[:, 1] >= y0 - overlap) & (xyz[:, 1] < y0 + tile_size + overlap)
                 )
-                if mask.sum() < 16384:
-                    pbar.set_postfix_str("skip — too few pts")
+                point_count = int(mask.sum())
+                if point_count == 0:
+                    pbar.set_postfix_str("skip — empty")
                     continue
 
                 tile_labels = labels[mask]
-                supervised_labels = tile_labels[tile_labels >= 0]
-                if np.unique(supervised_labels).size <= 3:
-                    pbar.set_postfix_str("skip — only three classes")
-                    continue
-
-                if set(supervised_labels.tolist()).issubset(SKIP_CLASSES):
-                    pbar.set_postfix_str("skip — only ground/tree")
-                    continue
 
                 tile_xyz        = xyz[mask].copy()
                 tile_xyz[:, :2] -= tile_xyz[:, :2].mean(axis=0)
 
-                pbar.set_postfix_str(f"{mask.sum():,} pts")
+                pbar.set_postfix_str(f"{point_count:,} pts")
                 yield tile_xyz, feats[mask].copy(), tile_labels, (i, j)
 
 
