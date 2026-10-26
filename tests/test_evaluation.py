@@ -119,6 +119,8 @@ def test_collect_samples_segments_whole_cloud_then_saves_labeled_pairs(
     sample = np.load(summary["sample_paths"][0])
     np.testing.assert_array_equal(sample, [[0, 0], [1, 1]])
     assert summary["sampled_points"] == 2
+    assert summary["labeled_points"] == 2
+    np.testing.assert_array_equal(summary["confusion_matrix"], [[1, 0], [0, 1]])
 
 
 def test_collect_samples_infers_unlabeled_cloud_without_writing_sample(
@@ -144,6 +146,24 @@ def test_collect_samples_infers_unlabeled_cloud_without_writing_sample(
     assert calls == [1]
     assert summary["sample_paths"] == []
     assert summary["labeled_files"] == 0
+    assert summary["labeled_points"] == 0
+    np.testing.assert_array_equal(summary["confusion_matrix"], np.zeros((2, 2)))
+
+
+def test_exact_metrics_are_computed_from_full_confusion_not_report_sample():
+    # The bounded report sample can be balanced while the real cloud is not.
+    confusion = np.array([[900, 100], [9, 1]])
+    metrics = evaluation.calculate_metrics_from_confusion(
+        confusion,
+        predictions=np.array([0, 1]),
+        targets=np.array([0, 1]),
+    )
+
+    assert metrics["accuracy"] == pytest.approx(901 / 1010)
+    assert metrics["balanced_accuracy"] == pytest.approx(0.5)
+    assert metrics["accuracy"] != np.mean(
+        metrics["predictions"] == metrics["targets"]
+    )
 
 
 def test_parser_exposes_raw_evaluation_contract(tmp_path):
@@ -205,7 +225,9 @@ def test_run_evaluation_removes_temporary_samples(tmp_path, monkeypatch):
         sample = temp_dir / "sample.npy"
         np.save(sample, np.array([[0, 0], [1, 1]]))
         return {"sample_paths": [sample], "processed_files": 1,
-                "labeled_files": 1, "sampled_points": 2}
+                "labeled_files": 1, "sampled_points": 2,
+                "labeled_points": 2,
+                "confusion_matrix": np.eye(2, dtype=np.int64)}
 
     monkeypatch.setattr(evaluation, "collect_samples", collect)
     monkeypatch.setattr(evaluation, "ClassificationReport", lambda **kwargs: None)

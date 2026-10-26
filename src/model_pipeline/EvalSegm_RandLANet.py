@@ -21,6 +21,7 @@ else:
 
 class EvaluationMetrics(TypedDict):
     accuracy: float
+    balanced_accuracy: float
     miou: float
     class_iou: np.ndarray
     predictions: np.ndarray
@@ -32,6 +33,8 @@ class CollectionSummary(TypedDict):
     processed_files: int
     labeled_files: int
     sampled_points: int
+    labeled_points: int
+    confusion_matrix: np.ndarray
 
 
 class ArtifactPaths(TypedDict):
@@ -146,16 +149,70 @@ def calculate_metrics(predictions: np.ndarray, targets: np.ndarray, num_classes:
         if values.min() < 0 or values.max() >= num_classes:
             raise ValueError(f'{name} are outside the model class range')
     miou, class_iou = compute_mIoU(torch.from_numpy(predictions.astype(np.int64, copy=False)), torch.from_numpy(targets.astype(np.int64, copy=False)), num_classes)
-    return {'accuracy': float(np.mean(predictions == targets)), 'miou': miou,
+    confusion = np.bincount(
+        targets.astype(np.int64, copy=False) * num_classes
+        + predictions.astype(np.int64, copy=False),
+        minlength=num_classes ** 2,
+    ).reshape(num_classes, num_classes)
+    recalls = np.divide(
+        np.diag(confusion), confusion.sum(axis=1),
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=confusion.sum(axis=1) > 0,
+    )
+    present = confusion.sum(axis=1) > 0
+    return {'accuracy': float(np.mean(predictions == targets)),
+            'balanced_accuracy': float(recalls[present].mean()), 'miou': miou,
             'class_iou': class_iou.cpu().numpy(), 'predictions': predictions,
             'targets': targets}
+
+
+def calculate_metrics_from_confusion(
+    confusion: np.ndarray,
+    predictions: np.ndarray,
+    targets: np.ndarray,
+) -> EvaluationMetrics:
+    """Calculate exact cloud metrics without retaining every labeled point."""
+    confusion = np.asarray(confusion, dtype=np.int64)
+    if confusion.ndim != 2 or confusion.shape[0] != confusion.shape[1]:
+        raise ValueError('confusion must be a square matrix')
+    if np.any(confusion < 0) or confusion.sum() == 0:
+        raise ValueError('confusion must contain labeled points')
+
+    diagonal = np.diag(confusion).astype(np.float64)
+    ground_truth = confusion.sum(axis=1)
+    predicted = confusion.sum(axis=0)
+    union = ground_truth + predicted - diagonal
+    class_iou = np.divide(
+        diagonal, union,
+        out=np.zeros(len(confusion), dtype=np.float64),
+        where=union > 0,
+    )
+    recall = np.divide(
+        diagonal, ground_truth,
+        out=np.zeros(len(confusion), dtype=np.float64),
+        where=ground_truth > 0,
+    )
+    present = ground_truth > 0
+    return {
+        'accuracy': float(diagonal.sum() / confusion.sum()),
+        'balanced_accuracy': float(recall[present].mean()),
+        'miou': float(class_iou[present].mean()),
+        'class_iou': class_iou,
+        # These bounded arrays are retained only for the human-readable,
+        # class-balanced classification report.
+        'predictions': np.asarray(predictions),
+        'targets': np.asarray(targets),
+    }
 
 
 def collect_samples(segmenter: Any, files: list[pth.Path], max_points: int,
                     temp_dir: pth.Path, rng: np.random.Generator,
                     verbose: bool = True) -> CollectionSummary:
     sample_paths: list[pth.Path] = []
-    labeled_files = sampled_points = 0
+    labeled_files = sampled_points = labeled_points = 0
+    confusion = np.zeros(
+        (segmenter.n_classes, segmenter.n_classes), dtype=np.int64
+    )
     iterator = tqdm(files, desc='Evaluating files', unit='file') if verbose else files
     for file_index, file_path in enumerate(iterator):
         try:
@@ -182,15 +239,24 @@ def collect_samples(segmenter: Any, files: list[pth.Path], max_points: int,
         targets = stored_targets[labeled_indices] - 1
         if targets.min() < 0 or targets.max() >= segmenter.n_classes:
             raise ValueError(f'{file_path}: targets outside model class range')
+        labeled_predictions = predictions[labeled_indices].astype(
+            np.int64, copy=False
+        )
+        encoded = targets * segmenter.n_classes + labeled_predictions
+        confusion += np.bincount(
+            encoded, minlength=segmenter.n_classes ** 2
+        ).reshape(segmenter.n_classes, segmenter.n_classes)
+        labeled_points += len(targets)
         chosen = _stratified_indices(targets, max_points, rng)
-        sample = np.column_stack((targets[chosen], predictions[labeled_indices][chosen]))
+        sample = np.column_stack((targets[chosen], labeled_predictions[chosen]))
         sample_path = pth.Path(temp_dir) / f'sample_{file_index:06d}.npy'
         np.save(sample_path, sample.astype(np.int16, copy=False))
         sample_paths.append(sample_path)
         labeled_files += 1
         sampled_points += len(sample)
     return {'sample_paths': sample_paths, 'processed_files': len(files),
-            'labeled_files': labeled_files, 'sampled_points': sampled_points}
+            'labeled_files': labeled_files, 'sampled_points': sampled_points,
+            'labeled_points': labeled_points, 'confusion_matrix': confusion}
 
 
 def run_dry_run(args: argparse.Namespace) -> None:
@@ -208,12 +274,20 @@ def run_evaluation(args: argparse.Namespace) -> EvaluationMetrics:
         if not summary['sample_paths']:
             raise RuntimeError('Input files contain no labeled points')
         combined = np.concatenate([np.load(path) for path in summary['sample_paths']])
-        metrics = calculate_metrics(combined[:, 1], combined[:, 0], segmenter.n_classes)
+        metrics = calculate_metrics_from_confusion(
+            summary['confusion_matrix'], combined[:, 1], combined[:, 0]
+        )
     paths['report_dir'].mkdir(exist_ok=True, parents=True)
-    info = f"Accuracy: {metrics['accuracy']}\nmIoU: {metrics['miou']}\nIoU per class: {metrics['class_iou']}"
+    info = (f"Exact labeled-point accuracy: {metrics['accuracy']}\n"
+            f"Exact balanced accuracy: {metrics['balanced_accuracy']}\n"
+            f"Exact mIoU: {metrics['miou']}\n"
+            f"Exact IoU per class: {metrics['class_iou']}\n"
+            "The precision/recall table above uses the bounded, "
+            "class-balanced report sample; headline metrics use all labeled points.")
     ClassificationReport(file_path=paths['report_dir'] / f'classification_report_{args.model_name}.txt', pred=metrics['predictions'], target=metrics['targets'], additional_info=info)
     print(f"Processed files: {summary['processed_files']}")
-    print(f"Sampled points: {summary['sampled_points']}")
+    print(f"Labeled points: {summary['labeled_points']}")
+    print(f"Report sample points: {summary['sampled_points']}")
     print(info)
     return metrics
 
