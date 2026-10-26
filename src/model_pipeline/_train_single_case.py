@@ -1,6 +1,7 @@
 import copy
 import pathlib as pth
 import sys
+import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -13,11 +14,58 @@ from RandLANet_CB import RandLANet
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from utils import compute_pos_weights_cloud, get_dataset_len, FocalLoss
+from utils import get_dataset_len, FocalLoss
 from utils import wrap_hist
 
 from tqdm import tqdm
 from typing import Union, Generator
+
+
+def compute_pos_weights_cloud(
+    data_dir,
+    num_classes: int,
+    power: float = 0.25,
+) -> torch.Tensor:
+    """Compute class weights while allowing -1 context-only points."""
+    paths = sorted(pth.Path(data_dir).glob("*.npy"))
+    if not pth.Path(data_dir).exists():
+        raise FileNotFoundError(f"Dataset directory does not exist: {data_dir}")
+    if not paths:
+        raise FileNotFoundError(f"No .npy point-cloud tiles in {data_dir}")
+
+    counts = np.zeros(num_classes, dtype=np.int64)
+    for path in paths:
+        data = np.load(path, mmap_mode="r")
+        if data.ndim != 2 or data.shape[1] != 5 or len(data) == 0:
+            raise ValueError(f"Expected non-empty (N, 5) data in {path}")
+        values = np.asarray(data[:, 4])
+        if not np.all(np.isfinite(values)) or np.any(values != np.floor(values)):
+            raise ValueError(f"Invalid labels in {path}")
+        labels = values.astype(np.int64)
+        if np.any((labels < -1) | (labels >= num_classes)):
+            raise ValueError(f"Label outside configured classes in {path}")
+        labels = labels[labels >= 0]
+        counts += np.bincount(labels, minlength=num_classes)
+
+    weights = (1.0 / (counts + 1e-6)) ** power
+    weights[counts == 0] = 0.0
+    if weights.max() == 0:
+        raise ValueError(f"No labeled points in {data_dir}")
+    weights /= weights.max()
+    return torch.from_numpy(weights.astype(np.float32))
+
+
+def _labeled_outputs(
+    outputs: torch.Tensor,
+    labels: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Flatten logits and remove context-only targets marked with -1."""
+    flattened_outputs = outputs.movedim(1, -1).reshape(-1, outputs.shape[1])
+    flattened_labels = labels.reshape(-1)
+    valid = flattened_labels >= 0
+    if not torch.any(valid):
+        raise RuntimeError("Sampled crop contains no labeled points")
+    return flattened_outputs[valid], flattened_labels[valid]
 
 
 def _dataset_lengths(train_loader, val_loader, enabled: bool):
@@ -173,7 +221,10 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                     outputs = outputs.to(device_loss)
                     batch_y = batch_y.to(device_loss)
 
-                    loss_t = criterion_t(outputs, batch_y)
+                    labeled_outputs, labeled_targets = _labeled_outputs(
+                        outputs, batch_y
+                    )
+                    loss_t = criterion_t(labeled_outputs, labeled_targets)
 
                     optimizer.zero_grad()
                     loss_t.backward()
@@ -187,9 +238,10 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                     current_lr = optimizer.param_groups[0]['lr']
 
-                    epoch_loss_t += loss_t.item() * batch_y.numel()
+                    labeled_count = labeled_targets.numel()
+                    epoch_loss_t += loss_t.item() * labeled_count
                     # epoch_accuracy_t += accuracy_t * batch_y.size(0)
-                    epoch_samples_t += batch_y.numel()
+                    epoch_samples_t += labeled_count
 
                     avg_loss_t = epoch_loss_t / epoch_samples_t
                     # avg_accuracy_t = epoch_accuracy_t / epoch_samples_t
@@ -220,11 +272,14 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                         outputs = outputs.to(device_loss)
                         batch_y = batch_y.to(device_loss)
 
-                        loss_v = criterion_v(outputs, batch_y)
+                        labeled_outputs, labeled_targets = _labeled_outputs(
+                            outputs, batch_y
+                        )
+                        loss_v = criterion_v(labeled_outputs, labeled_targets)
 
-                        predictions = outputs.argmax(dim=1)
-                        target_cpu = batch_y.reshape(-1).cpu()
-                        prediction_cpu = predictions.reshape(-1).cpu()
+                        predictions = labeled_outputs.argmax(dim=1)
+                        target_cpu = labeled_targets.cpu()
+                        prediction_cpu = predictions.cpu()
                         encoded = (
                             target_cpu * training_dict['num_classes']
                             + prediction_cpu
@@ -237,7 +292,7 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                             training_dict['num_classes'],
                         )
 
-                        point_count = batch_y.numel()
+                        point_count = labeled_targets.numel()
                         epoch_loss_v += loss_v.item() * point_count
                         epoch_samples_v += point_count
 
