@@ -128,6 +128,23 @@ def test_class_weights_ignore_context_only_points(tmp_path):
     torch.testing.assert_close(weights, torch.tensor([0.5, 1.0]))
 
 
+def test_normalized_focal_loss_is_independent_of_global_alpha_scale():
+    logits = torch.zeros((4, 2))
+    targets = torch.tensor([0, 0, 1, 1])
+    first = train_case.NormalizedFocalLoss(
+        alpha=torch.tensor([0.02, 1.0]), gamma=1.0, smoothing=0.0
+    )
+    second = train_case.NormalizedFocalLoss(
+        alpha=torch.tensor([0.2, 10.0]), gamma=1.0, smoothing=0.0
+    )
+
+    first_loss = first(logits, targets)
+    second_loss = second(logits, targets)
+
+    torch.testing.assert_close(first_loss, second_loss)
+    assert first_loss.item() == pytest.approx(0.5 * np.log(2))
+
+
 @pytest.mark.parametrize("use_provided_model", [False, True])
 def test_repeats_are_independent_and_use_updated_loader_api(
     monkeypatch,
@@ -160,7 +177,9 @@ def test_repeats_are_independent_and_use_updated_loader_api(
             loss_instances.append(self)
 
         def forward(self, outputs, labels):
-            return torch.nn.functional.cross_entropy(outputs, labels)
+            return torch.nn.functional.cross_entropy(
+                outputs, labels, reduction="none"
+            )
 
     def make_model(model_config, n_classes):
         model = TinyModel()

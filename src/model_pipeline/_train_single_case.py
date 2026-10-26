@@ -21,6 +21,33 @@ from tqdm import tqdm
 from typing import Union, Generator
 
 
+class NormalizedFocalLoss(nn.Module):
+    """Focal loss whose weighted mean is independent of alpha scale."""
+
+    def __init__(self, alpha, gamma: float, smoothing: float = 0.1):
+        super().__init__()
+        self.base_loss = FocalLoss(
+            alpha=alpha,
+            gamma=gamma,
+            smoothing=smoothing,
+            reduction='none',
+        )
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        losses = self.base_loss(inputs, targets)
+        if losses.ndim == 0:
+            raise RuntimeError("FocalLoss reduction='none' returned a scalar")
+        alpha = self.base_loss.alpha
+        if alpha is None:
+            return losses.mean()
+        alpha = alpha.to(inputs.device)
+        sample_weights = alpha.gather(0, targets.reshape(-1))
+        denominator = sample_weights.sum()
+        if denominator <= 0:
+            raise RuntimeError("Focal-loss target weights sum to zero")
+        return losses.reshape(-1).sum() / denominator
+
+
 def compute_pos_weights_cloud(
     data_dir,
     num_classes: int,
@@ -166,18 +193,16 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
             model.to(training_dict['device'])
 
-            criterion_t = FocalLoss(
+            criterion_t = NormalizedFocalLoss(
                 alpha=class_weights_t.to(device_loss),
                 gamma=training_dict['focal_loss_gamma'],
                 smoothing=0.1,
-                reduction='mean',
             ).to(device_loss)
 
-            criterion_v = FocalLoss(
+            criterion_v = NormalizedFocalLoss(
                 alpha=class_weights_v.to(device_loss),
                 gamma=training_dict['focal_loss_gamma'],
                 smoothing=0.1,
-                reduction='mean',
             ).to(device_loss)
 
             optimizer = optim.AdamW(
