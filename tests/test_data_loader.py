@@ -150,6 +150,7 @@ def test_worker_rng_uses_worker_seed(
 ):
     save_tile(tmp_path)
     dataset = make_dataset(tmp_path)
+    dataset.shuffle = True
     worker_info = SimpleNamespace(num_workers=1, seed=101)
     monkeypatch.setattr(
         "torch.utils.data.get_worker_info",
@@ -165,11 +166,11 @@ def test_worker_rng_uses_worker_seed(
     second = list(dataset)
 
     assert first == [np.random.default_rng(101).random()]
-    assert second == [np.random.default_rng(102).random()]
+    assert second == [np.random.default_rng(103).random()]
     assert first != second
 
 
-def test_make_loader_uses_one_nonpersistent_producer(tmp_path, save_tile):
+def test_make_loader_uses_one_persistent_producer(tmp_path, save_tile):
     save_tile(tmp_path)
 
     loader, dataset = _data_loader.make_loader(
@@ -181,7 +182,7 @@ def test_make_loader_uses_one_nonpersistent_producer(tmp_path, save_tile):
     )
 
     assert loader.num_workers == 1
-    assert not loader.persistent_workers
+    assert loader.persistent_workers
     assert loader.prefetch_factor == 2
     assert not loader.pin_memory
     assert dataset.query_workers == 2
@@ -257,6 +258,69 @@ def test_tiles_smaller_than_crop_are_repeated_at_model_input(tmp_path):
 
     assert batches
     assert all(batch.shape[1:] == (8, 4) for batch, _ in batches)
+
+
+def test_fixed_step_budget_stops_epoch_without_exhaustive_coverage(
+    tmp_path,
+    save_tile,
+):
+    save_tile(tmp_path)
+    dataset = _data_loader.CustomDataset(
+        tmp_path,
+        num_points=8,
+        batch_size=2,
+        query_workers=1,
+        shuffle=True,
+        class_weights=[0.25, 1.0],
+        max_seen=3,
+        steps_per_epoch=5,
+        batches_per_file=2,
+    )
+
+    batches = list(dataset)
+
+    assert len(batches) == 5
+
+
+def test_validation_fixed_budget_repeats_identical_crops(tmp_path, save_tile):
+    save_tile(tmp_path)
+    dataset = _data_loader.CustomDataset(
+        tmp_path,
+        num_points=8,
+        batch_size=2,
+        query_workers=1,
+        shuffle=False,
+        steps_per_epoch=2,
+        batches_per_file=2,
+    )
+
+    first = list(dataset)
+    second = list(dataset)
+
+    assert len(first) == len(second) == 2
+    for (first_x, first_y), (second_x, second_y) in zip(first, second):
+        np.testing.assert_array_equal(first_x, second_x)
+        np.testing.assert_array_equal(first_y, second_y)
+
+
+def test_class_targets_never_exclude_frequent_classes(tmp_path, save_tile):
+    path = save_tile(tmp_path)
+    dataset = _data_loader.CustomDataset(
+        tmp_path,
+        num_points=8,
+        batch_size=2,
+        query_workers=1,
+        shuffle=False,
+        class_weights=[0.0, 1.0],
+        max_seen=3,
+        steps_per_epoch=1,
+    )
+
+    _, labels = next(dataset._iter_file(path, np.random.default_rng(0), 1))
+
+    # Weight zero still maps to target one, so common class 0 remains eligible
+    # as a center and appears in naturally distributed neighborhoods.
+    assert 0 in labels.numpy()
 
 
 @pytest.mark.parametrize("max_seen", [0, 128, True])
