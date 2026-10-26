@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import numpy as np
 from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 
 
@@ -96,6 +97,26 @@ def test_known_dataset_length_uses_one_cycle_scheduler():
 
     assert isinstance(scheduler, OneCycleLR)
     assert scheduler.total_steps == 8
+
+
+def test_context_only_labels_are_excluded_from_loss_inputs():
+    outputs = torch.tensor([[[2.0, 3.0, 4.0], [5.0, 6.0, 7.0]]])
+    labels = torch.tensor([[0, -1, 1]])
+
+    logits, targets = train_case._labeled_outputs(outputs, labels)
+
+    torch.testing.assert_close(logits, torch.tensor([[2.0, 5.0], [4.0, 7.0]]))
+    torch.testing.assert_close(targets, torch.tensor([0, 1]))
+
+
+def test_class_weights_ignore_context_only_points(tmp_path):
+    data = np.zeros((5, 5), dtype=np.float32)
+    data[:, 4] = [-1, -1, 0, 0, 1]
+    np.save(tmp_path / "tile.npy", data)
+
+    weights = train_case.compute_pos_weights_cloud(tmp_path, 2, power=1.0)
+
+    torch.testing.assert_close(weights, torch.tensor([0.5, 1.0]))
 
 
 @pytest.mark.parametrize("use_provided_model", [False, True])

@@ -11,7 +11,7 @@ import shutil
 # ------------------------------------------------------------------
 # 1. Load + normalise intensity only
 # ------------------------------------------------------------------
-def load_and_normalise(las_path):
+def load_and_normalise(las_path, retain_unclassified=True):
     las = laspy.read(las_path)
     # keep float64 until after centering
     xyz = np.stack([
@@ -26,13 +26,23 @@ def load_and_normalise(las_path):
 
     intensity = np.array(las.intensity, dtype=np.float32)
     intensity = intensity.reshape(-1, 1)
-    intensity = intensity / (intensity.max() + 1e-6) # normalise to [0, 1]
+    maximum_intensity = intensity.max()
+    if maximum_intensity > 0:
+        intensity /= maximum_intensity
+    else:
+        intensity.fill(0)
     feats     = intensity
-    labels    = np.array(las.classification, dtype=np.int32)
-
-    xyz = xyz[labels!=0]
-    feats = feats[labels!=0]
-    labels = labels[labels!=0]-1 # rm not classified
+    labels = np.array(las.classification, dtype=np.int32)
+    if retain_unclassified:
+        # LAS class 0 remains available as geometric context but is ignored by
+        # the loss and metrics. Classified labels retain the existing 0-based
+        # model mapping.
+        labels = labels - 1
+    else:
+        classified = labels != 0
+        xyz = xyz[classified]
+        feats = feats[classified]
+        labels = labels[classified] - 1
     del las
     return xyz, feats, labels
 
@@ -115,11 +125,12 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
                     continue
 
                 tile_labels = labels[mask]
-                if np.unique(tile_labels).size <= 3:
+                supervised_labels = tile_labels[tile_labels >= 0]
+                if np.unique(supervised_labels).size <= 3:
                     pbar.set_postfix_str("skip — only three classes")
                     continue
 
-                if set(tile_labels.tolist()).issubset(SKIP_CLASSES):
+                if set(supervised_labels.tolist()).issubset(SKIP_CLASSES):
                     pbar.set_postfix_str("skip — only ground/tree")
                     continue
 
@@ -133,7 +144,14 @@ def iter_tiles(xyz, feats, labels, tile_size=40.0, overlap=5.0):
 # ------------------------------------------------------------------
 # 4. Save tiles as .npy + precomputed KDTree as .pkl
 # ------------------------------------------------------------------
-def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
+def save_tiles(
+    las_path,
+    cut_dir,
+    voxel_size=0.1,
+    tile_size=40.0,
+    overlap=5.0,
+    retain_unclassified=True,
+):
     cut_dir = Path(cut_dir)
     cut_dir.mkdir(parents=True, exist_ok=True)
 
@@ -147,7 +165,9 @@ def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
 
     tqdm.write("  Loading + normalising intensity...")
     try:
-        xyz, feats, labels = load_and_normalise(las_path)
+        xyz, feats, labels = load_and_normalise(
+            las_path, retain_unclassified=retain_unclassified
+        )
     except Exception as e:
         tqdm.write(f"    ERROR: {e}")
         return
@@ -163,7 +183,7 @@ def save_tiles(las_path, cut_dir, voxel_size=0.1, tile_size=40.0):
 
     saved   = 0
     for tile_xyz, tile_feats, tile_labels, (ti, tj) in iter_tiles(
-        xyz, feats, labels, tile_size
+        xyz, feats, labels, tile_size, overlap
     ):
         name = f"{stem}_{source_id}_tile_{ti:03d}_{tj:03d}"
         pcd_path = cut_dir / f"{name}.npy"
@@ -267,6 +287,8 @@ if __name__ == "__main__":
     
     VOXEL_SIZE = 0.10
     TILE_SIZE  = 60.0
+    OVERLAP = 5.0
+    RETAIN_UNCLASSIFIED = True
 
     split_raw_files(LAS_ROOT, SPLIT_DIR)
 
@@ -277,5 +299,12 @@ if __name__ == "__main__":
 
     with tqdm(total=len(las_paths), desc="Overall progress", unit="file") as overall_pbar:
         for las_path in las_paths:
-            save_tiles(las_path, CUT_DIR / las_path.parent.name, VOXEL_SIZE, TILE_SIZE)
+            save_tiles(
+                las_path,
+                CUT_DIR / las_path.parent.name,
+                VOXEL_SIZE,
+                TILE_SIZE,
+                OVERLAP,
+                RETAIN_UNCLASSIFIED,
+            )
             overall_pbar.update(1)

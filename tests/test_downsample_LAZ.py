@@ -1,6 +1,7 @@
 import pickle
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -30,7 +31,9 @@ def save_tile(monkeypatch, point_cloud):
         monkeypatch.setattr(
             downsample_LAZ,
             "load_and_normalise",
-            lambda _source_path: (xyz.copy(), feats.copy(), labels.copy()),
+            lambda _source_path, **_kwargs: (
+                xyz.copy(), feats.copy(), labels.copy()
+            ),
         )
         monkeypatch.setattr(
             downsample_LAZ,
@@ -47,6 +50,40 @@ def save_tile(monkeypatch, point_cloud):
         downsample_LAZ.save_tiles(source_path, output_dir)
 
     return save
+
+
+def test_unclassified_points_are_retained_as_ignored_context(monkeypatch):
+    cloud = SimpleNamespace(
+        x=np.array([100.0, 101.0, 102.0]),
+        y=np.array([200.0, 200.0, 200.0]),
+        z=np.array([10.0, 10.0, 10.0]),
+        intensity=np.array([0, 5, 10]),
+        classification=np.array([0, 1, 2]),
+    )
+    monkeypatch.setattr(downsample_LAZ.laspy, "read", lambda _: cloud)
+
+    xyz, feats, labels = downsample_LAZ.load_and_normalise(
+        "scan.las", retain_unclassified=True
+    )
+
+    assert len(xyz) == 3
+    np.testing.assert_allclose(feats[:, 0], [0.0, 0.5, 1.0])
+    np.testing.assert_array_equal(labels, [-1, 0, 1])
+
+
+def test_legacy_preprocessing_can_still_drop_unclassified(monkeypatch):
+    cloud = SimpleNamespace(
+        x=np.array([0.0, 1.0]), y=np.zeros(2), z=np.zeros(2),
+        intensity=np.array([1, 2]), classification=np.array([0, 1]),
+    )
+    monkeypatch.setattr(downsample_LAZ.laspy, "read", lambda _: cloud)
+
+    xyz, _, labels = downsample_LAZ.load_and_normalise(
+        "scan.las", retain_unclassified=False
+    )
+
+    assert len(xyz) == 1
+    np.testing.assert_array_equal(labels, [0])
 
 
 def test_save_tiles_creates_distinct_paired_artifacts(tmp_path, save_tile, point_cloud):

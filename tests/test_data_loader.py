@@ -223,6 +223,24 @@ def test_class_weights_require_more_coverage_for_rare_points(
     assert label_occurrences[1] > label_occurrences[0]
 
 
+def test_ignored_points_are_context_but_never_crop_centers(
+    tmp_path,
+    save_tile,
+    make_dataset,
+):
+    path = save_tile(tmp_path)
+    data = np.load(path)
+    data[:6, 4] = -1
+    np.save(path, data)
+    dataset = make_dataset(tmp_path)
+
+    batches = list(dataset._iter_file(path, np.random.default_rng(2)))
+
+    assert batches
+    assert all(np.all(labels[:, 0].numpy() >= 0) for _, labels in batches)
+    assert any(np.any(labels.numpy() == -1) for _, labels in batches)
+
+
 @pytest.mark.parametrize("max_seen", [0, 128, True])
 def test_max_seen_must_fit_coverage_counter(tmp_path, save_tile, max_seen):
     save_tile(tmp_path)

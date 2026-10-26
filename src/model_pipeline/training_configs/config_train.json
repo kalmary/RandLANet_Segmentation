@@ -18,6 +18,7 @@
     "tile_size": 60.0,
     "overlap": 5.0,
     "intensity_normalization": "linear_max",
+    "retain_unclassified": true,
 
     "epochs": [75, 125, 25],
     "focal_loss_gamma": [1.0, 2.0, 0.5],

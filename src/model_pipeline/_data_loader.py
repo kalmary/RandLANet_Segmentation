@@ -83,8 +83,8 @@ class CustomDataset(IterableDataset):
                 f"{path.name} contains {len(xyz)} points, "
                 f"but num_points is {self.num_points}"
             )
-        if labels.size and labels.min() < 0:
-            raise ValueError(f"Negative labels found in {path}")
+        if labels.size and labels.min() < -1:
+            raise ValueError(f"Labels below ignore label -1 found in {path}")
         if (
             self.class_weights is not None
             and labels.size
@@ -142,14 +142,18 @@ class CustomDataset(IterableDataset):
     def _iter_file(self, path, rng):
         xyz, feats, labels, tree = self._load_file(path)
         possibilities = rng.random(len(xyz)) * 1e-3
+        valid = labels >= 0
+        if not np.any(valid):
+            raise ValueError(f"No labeled points in {path}")
         if self.class_weights is None:
-            targets = np.ones(len(xyz), dtype=np.int16)
+            targets = valid.astype(np.int16)
         else:
             class_targets = np.maximum(
                 1,
                 np.floor(self.class_weights * self.max_seen + 0.5),
             ).astype(np.int16)
-            targets = class_targets[labels]
+            targets = np.zeros(len(xyz), dtype=np.int16)
+            targets[valid] = class_targets[labels[valid]]
         seen = np.zeros(len(xyz), dtype=np.int16)
 
         while np.any(seen < targets):
