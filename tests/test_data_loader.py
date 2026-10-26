@@ -328,3 +328,10 @@ def test_max_seen_must_fit_coverage_counter(tmp_path, save_tile, max_seen):
     save_tile(tmp_path)
     with pytest.raises(ValueError, match="max_seen"):
         _data_loader.CustomDataset(tmp_path, max_seen=max_seen)
+@pytest.mark.parametrize("fraction", [-0.1, 1.1, np.inf])
+def test_class_aware_fraction_is_a_probability(tmp_path, save_tile, fraction):
+    save_tile(tmp_path)
+    with pytest.raises(ValueError, match="class_aware_fraction"):
+        _data_loader.CustomDataset(
+            tmp_path, class_aware_fraction=fraction
+        )
