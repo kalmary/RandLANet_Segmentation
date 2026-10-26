@@ -16,6 +16,8 @@ class CustomDataset(IterableDataset):
         shuffle: bool = True,
         query_workers: int = -1,
         epoch: int = 0,
+        class_weights=None,
+        max_seen: int = 1,
     ):
         self.files = sorted(Path(data_dir).glob("*.npy"))
         self.num_points = num_points
@@ -23,6 +25,18 @@ class CustomDataset(IterableDataset):
         self.shuffle = shuffle
         self.query_workers = query_workers
         self._epoch = epoch
+        self.class_weights = None
+        if class_weights is not None:
+            self.class_weights = np.asarray(class_weights, dtype=np.float64)
+            if self.class_weights.ndim != 1 or not self.class_weights.size:
+                raise ValueError("class_weights must be a non-empty 1-D array")
+            if not np.all(np.isfinite(self.class_weights)):
+                raise ValueError("class_weights must be finite")
+            if np.any((self.class_weights < 0) | (self.class_weights > 1)):
+                raise ValueError("class_weights must be within [0, 1]")
+        if isinstance(max_seen, (bool, np.bool_)) or not 1 <= max_seen <= 127:
+            raise ValueError("max_seen must be an integer within [1, 127]")
+        self.max_seen = int(max_seen)
 
         if not self.files:
             raise FileNotFoundError(f"No .npy files in {data_dir}")
@@ -71,6 +85,12 @@ class CustomDataset(IterableDataset):
             )
         if labels.size and labels.min() < 0:
             raise ValueError(f"Negative labels found in {path}")
+        if (
+            self.class_weights is not None
+            and labels.size
+            and labels.max() >= len(self.class_weights)
+        ):
+            raise ValueError(f"Label outside class_weights in {path}")
 
         return xyz, feats, labels, tree
 
@@ -122,14 +142,22 @@ class CustomDataset(IterableDataset):
     def _iter_file(self, path, rng):
         xyz, feats, labels, tree = self._load_file(path)
         possibilities = rng.random(len(xyz)) * 1e-3
-        covered = np.zeros(len(xyz), dtype=bool)
+        if self.class_weights is None:
+            targets = np.ones(len(xyz), dtype=np.int16)
+        else:
+            class_targets = np.maximum(
+                1,
+                np.floor(self.class_weights * self.max_seen + 0.5),
+            ).astype(np.int16)
+            targets = class_targets[labels]
+        seen = np.zeros(len(xyz), dtype=np.int16)
 
-        while not np.all(covered):
-            remaining = np.flatnonzero(~covered)
+        while np.any(seen < targets):
+            remaining = np.flatnonzero(seen < targets)
             center_count = min(self.batch_size, remaining.size)
-            ranked = np.argsort(
-                possibilities[remaining],
-                kind="stable",
+            normalized_coverage = seen[remaining] / targets[remaining]
+            ranked = np.lexsort(
+                (possibilities[remaining], normalized_coverage),
             )
             center_indices = remaining[ranked[:center_count]]
             neighbor_indices = self._query_neighbors(
@@ -143,7 +171,8 @@ class CustomDataset(IterableDataset):
                 center_indices,
                 neighbor_indices,
             )
-            covered[neighbor_indices] = True
+            np.add.at(seen, neighbor_indices, 1)
+            np.minimum(seen, 127, out=seen)
 
             centers = xyz[center_indices, None, :]
             batch_xyz = xyz[neighbor_indices] - centers
@@ -159,7 +188,7 @@ class CustomDataset(IterableDataset):
                 torch.from_numpy(batch_labels),
             )
 
-        return covered
+        return seen >= targets
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -189,6 +218,8 @@ def make_loader(
     query_workers: int = -1,
     shuffle: bool = True,
     epoch: int = 0,
+    class_weights=None,
+    max_seen: int = 1,
 ) -> tuple[DataLoader, CustomDataset]:
     dataset = CustomDataset(
         data_dir=data_dir,
@@ -197,6 +228,8 @@ def make_loader(
         shuffle=shuffle,
         query_workers=query_workers,
         epoch=epoch,
+        class_weights=class_weights,
+        max_seen=max_seen,
     )
     loader = DataLoader(
         dataset,

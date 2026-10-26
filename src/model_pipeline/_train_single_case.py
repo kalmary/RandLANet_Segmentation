@@ -2,12 +2,10 @@ import copy
 import pathlib as pth
 import sys
 import torch
-from torchinfo import summary
 import torch.optim as optim
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 
-import torch.multiprocessing as mp
 from _data_loader import make_loader
 
 from RandLANet_CB import RandLANet
@@ -15,10 +13,8 @@ from RandLANet_CB import RandLANet
 src_dir = pth.Path(__file__).parent.parent
 sys.path.append(str(src_dir))
 
-from utils import compute_mIoU
 from utils import compute_pos_weights_cloud, get_dataset_len, FocalLoss
 from utils import wrap_hist
-from utils.nn_utils import calculate_accuracy
 
 from tqdm import tqdm
 from typing import Union, Generator
@@ -56,21 +52,19 @@ def _build_scheduler(optimizer, training_dict: dict, total_t: int | None):
 def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], None, None],
                                               Generator[tuple[None, dict], None, None]]:
     device_gpu = torch.device('cuda')
-    device_cpu = torch.device('cpu')
-
-    device_loader = device_gpu
     device_loss = device_gpu
 
     try:
 
+        weight_power = training_dict.get('class_weight_power', 0.5)
         class_weights_t = compute_pos_weights_cloud(data_dir=training_dict['data_path_train'],
                                                 num_classes=training_dict['num_classes'],
-                                                power=0.5)
+                                                power=weight_power)
 
         
         class_weights_v = compute_pos_weights_cloud(data_dir=training_dict['data_path_val'],
                                                 num_classes=training_dict['num_classes'],
-                                                power=0.5
+                                                power=weight_power
         )
 
 
@@ -80,6 +74,8 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             batch_size=training_dict['batch_size'],
             query_workers=training_dict.get('query_workers', 7),
             shuffle=True,
+            class_weights=class_weights_t.numpy(),
+            max_seen=training_dict.get('max_seen', 10),
         )
 
         valLoader, _ = make_loader(
@@ -88,12 +84,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
             batch_size=training_dict['batch_size'],
             query_workers=training_dict.get('query_workers', 7),
             shuffle=False,
+            max_seen=1,
         )
 
         total_t, total_v = _dataset_lengths(
             trainLoader,
             valLoader,
-            enabled=True,
+            enabled=False,
         )
 
         repeat_pbar = tqdm(range(training_dict['train_repeat']), 
@@ -151,12 +148,13 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
                 epoch_loss_t = 0.
                 epoch_loss_v = 0.
 
-                epoch_accuracy_v = 0.
-
                 epoch_samples_t = 0
                 epoch_samples_v = 0
 
-                epoch_miou_v = 0.
+                confusion_v = torch.zeros(
+                    (training_dict['num_classes'], training_dict['num_classes']),
+                    dtype=torch.int64,
+                )
 
 
                 progressbar_t = tqdm(trainLoader, 
@@ -189,9 +187,9 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                     current_lr = optimizer.param_groups[0]['lr']
 
-                    epoch_loss_t += loss_t.item() * batch_y.size(0)
+                    epoch_loss_t += loss_t.item() * batch_y.numel()
                     # epoch_accuracy_t += accuracy_t * batch_y.size(0)
-                    epoch_samples_t += batch_y.size(0)
+                    epoch_samples_t += batch_y.numel()
 
                     avg_loss_t = epoch_loss_t / epoch_samples_t
                     # avg_accuracy_t = epoch_accuracy_t / epoch_samples_t
@@ -224,19 +222,38 @@ def train_model(training_dict: dict) -> Union[Generator[tuple[nn.Module, dict], 
 
                         loss_v = criterion_v(outputs, batch_y)
 
-                        accuracy_v = calculate_accuracy(outputs, batch_y)
+                        predictions = outputs.argmax(dim=1)
+                        target_cpu = batch_y.reshape(-1).cpu()
+                        prediction_cpu = predictions.reshape(-1).cpu()
+                        encoded = (
+                            target_cpu * training_dict['num_classes']
+                            + prediction_cpu
+                        )
+                        confusion_v += torch.bincount(
+                            encoded,
+                            minlength=training_dict['num_classes'] ** 2,
+                        ).reshape(
+                            training_dict['num_classes'],
+                            training_dict['num_classes'],
+                        )
 
-                        mIoU, _ = compute_mIoU(outputs.cpu(), batch_y.cpu(), training_dict['num_classes'])
-
-
-                        epoch_loss_v += loss_v.item() * batch_y.size(0)
-                        epoch_accuracy_v += accuracy_v * batch_y.size(0)
-                        epoch_miou_v += mIoU * batch_y.size(0)
-                        epoch_samples_v += batch_y.size(0)
+                        point_count = batch_y.numel()
+                        epoch_loss_v += loss_v.item() * point_count
+                        epoch_samples_v += point_count
 
                         avg_loss_v = epoch_loss_v / epoch_samples_v
-                        avg_accuracy_v = epoch_accuracy_v / epoch_samples_v
-                        avg_miou_v = epoch_miou_v / epoch_samples_v
+                        avg_accuracy_v = (
+                            confusion_v.diag().sum().item()
+                            / confusion_v.sum().item()
+                        )
+                        ground_truth = confusion_v.sum(dim=1)
+                        predictions_per_class = confusion_v.sum(dim=0)
+                        union = ground_truth + predictions_per_class - confusion_v.diag()
+                        valid = ground_truth > 0
+                        avg_miou_v = (
+                            confusion_v.diag()[valid].float()
+                            / union[valid].clamp_min(1).float()
+                        ).mean().item()
 
                         progressbar_v.set_postfix({
                             "Loss_val": f"{avg_loss_v:.6f}",

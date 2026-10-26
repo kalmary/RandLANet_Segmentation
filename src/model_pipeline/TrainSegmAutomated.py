@@ -319,7 +319,10 @@ def case_based_training(exp_configs: list[dict],
 
             logger.info(f'Single model was generated. val_acc: {result_hist["acc_v_hist"][-1]:.3f}  val_loss: {result_hist["loss_v_hist"][-1]:.3f}')
 
-            final_val = result_hist['acc_v_hist'][-1]*0.6 + (1 / (1 + result_hist['loss_v_hist'][-1]))*0.4
+            # Match the original RandLA-Net selection criterion: retain the
+            # checkpoint with the best global validation mean IoU. Ordinary
+            # accuracy is dominated by frequent classes in imbalanced clouds.
+            final_val = result_hist['miou_v_hist'][-1]
 
             last_model, _, config_path = checkpoint.check_checkpoint(
                 model,

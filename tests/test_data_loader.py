@@ -188,4 +188,44 @@ def test_make_loader_uses_one_nonpersistent_producer(tmp_path, save_tile):
     context = loader.multiprocessing_context
     assert context is not None
     assert context.get_start_method() == "spawn"
+
+
+def test_class_weights_require_more_coverage_for_rare_points(
+    tmp_path,
+    sample_data,
+    save_tile,
+):
+    path = save_tile(tmp_path)
+    dataset = _data_loader.CustomDataset(
+        data_dir=tmp_path,
+        num_points=8,
+        batch_size=2,
+        query_workers=1,
+        shuffle=False,
+        class_weights=[0.25, 1.0],
+        max_seen=4,
+    )
+
+    iterator = dataset._iter_file(path, np.random.default_rng(3))
+    label_occurrences = np.zeros(2, dtype=np.int64)
+    while True:
+        try:
+            _, labels = next(iterator)
+        except StopIteration as result:
+            satisfied = result.value
+            break
+        label_occurrences += np.bincount(
+            labels.numpy().reshape(-1),
+            minlength=2,
+        )
+
+    assert np.all(satisfied)
+    assert label_occurrences[1] > label_occurrences[0]
+
+
+@pytest.mark.parametrize("max_seen", [0, 128, True])
+def test_max_seen_must_fit_coverage_counter(tmp_path, save_tile, max_seen):
+    save_tile(tmp_path)
+    with pytest.raises(ValueError, match="max_seen"):
+        _data_loader.CustomDataset(tmp_path, max_seen=max_seen)
     
