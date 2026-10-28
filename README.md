@@ -241,3 +241,8 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 
 
+
+
+Optional single-file timing and resource reports are described in
+[BENCHMARKING.md](BENCHMARKING.md). The separate runner writes text and CSV
+reports without modifying production inference.
