@@ -238,6 +238,10 @@ point inside a tile. Higher values perform more prediction passes and increase
 inference time. Softmax predictions from all passes are averaged before the
 final class is selected.
 
+Optional single-file timing and resource reports are described in
+[BENCHMARKING.md](BENCHMARKING.md). The separate runner writes text and CSV
+reports without modifying production inference.
+
 # 6. Testing <a name="testing"></a>
 
 Tests use pytest:

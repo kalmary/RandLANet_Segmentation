@@ -1,0 +1,2 @@
+# Optional dependencies for tools/benchmark_inference.py only.
+psutil>=5.9,<8
