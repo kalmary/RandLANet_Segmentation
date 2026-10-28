@@ -170,7 +170,12 @@ class Recorder:
         self.stop.set()
         self.thread.join()
         try:
-            self.sample()
+            try:
+                self.sample()
+            except Exception as error:
+                # Resource collection must not hide an inference exception or
+                # prevent writing the already-collected timing data.
+                self.sample_error = repr(error)
         finally:
             self.sample_stream.close()
             self.event_stream.close()
@@ -245,6 +250,12 @@ def run(args):
     source = args.input_path.expanduser().resolve()
     if not source.is_file() or source.suffix.lower() not in {'.las', '.laz'}:
         raise ValueError('input_path must be a single existing LAS/LAZ file')
+    if args.output_path is not None:
+        output = args.output_path.expanduser().resolve()
+        if output == source or output.exists():
+            raise FileExistsError(f'Refusing to overwrite {output}')
+        if output.suffix.lower() not in {'.las', '.laz'}:
+            raise ValueError('output_path must be a LAS/LAZ filename')
     if args.device == 'cuda' and not torch.cuda.is_available():
         raise RuntimeError('CUDA requested but unavailable')
     device = torch.device(args.device)
@@ -312,8 +323,6 @@ def run(args):
                         output = args.output_path.expanduser().resolve()
                         if output == source or output.exists():
                             raise FileExistsError(f'Refusing to overwrite {output}')
-                        if output.suffix.lower() not in {'.las', '.laz'}:
-                            raise ValueError('output_path must be a LAS/LAZ filename')
                         # Save the branch-native labels; class mapping is deliberately
                         # left to the caller, since these branches use different labels.
                         cloud.classification = labels

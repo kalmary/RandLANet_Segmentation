@@ -3,6 +3,7 @@ import csv
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 import time
 
 import numpy as np
@@ -95,3 +96,71 @@ def test_compare_preserves_branch_status_and_metrics(tmp_path):
     assert float(rows[0]['full_task_s']) == 2.5
     with pytest.raises(FileExistsError):
         benchmark.compare(SimpleNamespace(runs=runs, output=output))
+
+
+@pytest.mark.parametrize('legacy,fail', [(False, False), (True, False), (True, True)])
+def test_full_runner_with_fake_reader_and_model(tmp_path, monkeypatch, legacy, fail):
+    """Exercise summaries and both constructor APIs without reading a raw file."""
+    class Common:
+        config = {'num_classes': 2, 'model_config': {}}
+
+        def _model_predict(self, points):
+            if fail:
+                raise RuntimeError('fake model failed')
+            return np.zeros(len(points), dtype=np.uint8)
+
+        def segment_pcd(self, points, intensity):
+            return self._model_predict(points)
+
+    class Probability(Common):
+        def __init__(self, model_name, device, config_dir, pbar_bool):
+            assert pbar_bool is False
+            self._rng = np.random.default_rng()
+
+    class Legacy(Common):
+        def __init__(self, model_name, device, config_dir, verbose):
+            assert verbose is False
+
+    cloud = SimpleNamespace(x=np.arange(4), y=np.zeros(4), z=np.zeros(4),
+                            intensity=np.ones(4))
+    fake_laspy = SimpleNamespace(read=lambda _: cloud, __version__='fake')
+    fake_torch = SimpleNamespace(
+        device=lambda name: SimpleNamespace(type=name),
+        manual_seed=lambda _: None, __version__='fake',
+        version=SimpleNamespace(cuda=None),
+    )
+    fake_array = SimpleNamespace(SegmentClass=Legacy if legacy else Probability)
+    monkeypatch.setitem(sys.modules, 'laspy', fake_laspy)
+    monkeypatch.setitem(sys.modules, 'torch', fake_torch)
+    monkeypatch.setitem(sys.modules, 'src', SimpleNamespace(array_processing=fake_array))
+    source = tmp_path / 'placeholder.las'
+    source.write_bytes(b'placeholder, never passed to a LAS decoder')
+    directory = tmp_path / 'report'
+    args = SimpleNamespace(input_path=source, output_path=None, device='cpu',
+                           model_name='fake', config_dir='fake', model_dir=None,
+                           seed=42, sample_interval=0.01, report_dir=directory)
+    if fail:
+        with pytest.raises(RuntimeError, match='fake model failed'):
+            benchmark.run(args)
+    else:
+        benchmark.run(args)
+    summary = read_csv(directory / 'summary.csv')[0]
+    assert summary['status'] == ('error' if fail else 'ok')
+    assert int(summary['points']) == 4
+    assert float(summary['full_task_s']) >= float(summary['inference_s']) > 0
+    assert (directory / 'report.txt').exists()
+    assert summary['gpu_peak_allocated_bytes'] == ''
+    if fail:
+        assert 'fake model failed' in summary['error']
+
+
+def test_final_sampling_failure_preserves_timing_reports(tmp_path, monkeypatch):
+    directory = tmp_path / 'monitor_failure'
+    with benchmark.Recorder(directory) as recorder:
+        with recorder.stage('full_task'):
+            pass
+        def fail():
+            raise RuntimeError('monitor failed')
+        monkeypatch.setattr(recorder, 'sample', fail)
+    assert 'monitor failed' in recorder.sample_error
+    assert read_csv(directory / 'stages.csv')[0]['stage'] == 'full_task'
