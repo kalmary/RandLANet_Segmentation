@@ -175,12 +175,12 @@ The evaluation input path is resolved in this order:
 3. `data_path_test` from the saved model configuration.
 
 The inference pipeline applies the same voxel subsampling, intensity
-normalization, tiling, voting, and dense nearest-neighbor upsampling as
+normalization, tiling, and voting as
 `SegmentClass`. Inside every tile, crop centers follow a RandLA-Net spatial
 possibility map until every point reaches the configured `num_votes`
 possibility threshold (default: `3`); repeated softmax predictions are then
 averaged per point. Metrics
-include every classified source point (`classification != 0`) exactly once;
+include every classified voxel representative (`classification != 0`) exactly once;
 LAS classes are converted from `1..N` to model labels
 `0..N-1`. Unclassified points are segmented for spatial context but excluded
 from metrics. Evaluation reports ordinary accuracy and mIoU and creates a
@@ -209,6 +209,10 @@ in `processed_files.txt` are skipped on later runs, regardless of whether they
 also appear in `error_files.txt`. A per-file processing error is logged and does
 not stop the remaining files in the batch.
 
+Output LAS/LAZ files contain only the retained voxel representatives, with their
+original coordinates and attributes and predicted classifications. This keeps
+the cloud sparse for evaluating robustness to lower point density.
+
 For preloaded point clouds, use the segmentation class directly:
 
 ```python
@@ -230,8 +234,14 @@ segmenter = SegmentClass(
 
 points = np.random.random((1_000_000, 3)).astype(np.float32)
 intensity = np.random.randint(0, 65536, len(points), dtype=np.uint16)
-labels = segmenter.segment_pcd(points, intensity)
+labels, indices = segmenter.segment_pcd(points, intensity, return_indices=True)
+sparse_points = points[indices]
+sparse_intensity = intensity[indices]
 ```
+
+`segment_pcd()` returns labels only for the voxel representatives. Use
+`return_indices=True` to also obtain their input indices, aligned with the labels.
+Evaluation compares predictions with ground truth at these retained indices.
 
 `num_votes` is the minimum spatial possibility reached by every subsampled
 point inside a tile. Higher values perform more prediction passes and increase

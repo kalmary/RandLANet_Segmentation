@@ -90,20 +90,20 @@ def test_collect_samples_segments_whole_cloud_then_saves_labeled_pairs(
     cloud_path = tmp_path / "cloud.laz"
     cloud_path.touch()
     cloud = SimpleNamespace(
-        x=np.array([1.0, 2.0, 3.0]),
-        y=np.array([4.0, 5.0, 6.0]),
-        z=np.array([7.0, 8.0, 9.0]),
-        intensity=np.array([10, 11, 12]),
-        classification=np.array([0, 1, 2]),
+        x=np.array([1.0, 2.0, 3.0, 4.0]),
+        y=np.array([4.0, 5.0, 6.0, 7.0]),
+        z=np.array([7.0, 8.0, 9.0, 10.0]),
+        intensity=np.array([10, 11, 12, 13]),
+        classification=np.array([0, 1, 2, 1]),
     )
     calls = []
 
     class Segmenter:
         n_classes = 2
 
-        def segment_pcd(self, points, intensity):
+        def segment_pcd(self, points, intensity, *, return_indices=False):
             calls.append((points.copy(), intensity.copy()))
-            return np.array([1, 0, 1])
+            return np.array([1, 0]), np.array([2, 1])
 
     monkeypatch.setattr(evaluation.laspy, "read", lambda path: cloud)
     output = tmp_path / "samples"
@@ -114,10 +114,10 @@ def test_collect_samples_segments_whole_cloud_then_saves_labeled_pairs(
     )
 
     assert len(calls) == 1
-    assert calls[0][0].shape == (3, 3)
-    np.testing.assert_array_equal(calls[0][1], [10, 11, 12])
+    assert calls[0][0].shape == (4, 3)
+    np.testing.assert_array_equal(calls[0][1], [10, 11, 12, 13])
     sample = np.load(summary["sample_paths"][0])
-    np.testing.assert_array_equal(sample, [[0, 0], [1, 1]])
+    np.testing.assert_array_equal(sample, [[1, 1], [0, 0]])
     assert summary["sampled_points"] == 2
     assert summary["labeled_points"] == 2
     np.testing.assert_array_equal(summary["confusion_matrix"], [[1, 0], [0, 1]])
@@ -135,7 +135,7 @@ def test_collect_samples_infers_unlabeled_cloud_without_writing_sample(
     calls = []
     segmenter = SimpleNamespace(
         n_classes=2,
-        segment_pcd=lambda points, intensity: calls.append(len(points)) or np.array([0]),
+        segment_pcd=lambda points, intensity, **kwargs: calls.append(len(points)) or (np.array([0]), np.array([0])),
     )
     monkeypatch.setattr(evaluation.laspy, "read", lambda path: cloud)
 
@@ -304,7 +304,9 @@ def test_run_evaluation_cleans_samples_when_later_file_fails(
         evaluation, "_validated_segmenter",
         lambda args: SimpleNamespace(
             n_classes=2,
-            segment_pcd=lambda points, intensity: np.zeros(len(points), dtype=np.int64),
+            segment_pcd=lambda points, intensity, **kwargs: (
+                np.zeros(len(points), dtype=np.int64), np.arange(len(points))
+            ),
         ),
     )
     monkeypatch.setattr(evaluation, "collect_samples", collect)

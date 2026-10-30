@@ -222,17 +222,21 @@ def collect_samples(segmenter: Any, files: list[pth.Path], max_points: int,
             ))
             intensity = np.asarray(cloud.intensity)
             stored_targets = np.asarray(cloud.classification, dtype=np.int64)
-            predictions = np.asarray(segmenter.segment_pcd(points, intensity))
+            predictions, retained_indices = segmenter.segment_pcd(
+                points, intensity, return_indices=True,
+            )
+            predictions = np.asarray(predictions)
         except Exception as error:
             raise RuntimeError(
                 f'Failed to evaluate {file_path}: {error}'
             ) from error
         if len(intensity) != len(points) or len(stored_targets) != len(points):
             raise ValueError(f'{file_path}: point attributes have mismatched lengths')
-        if predictions.shape != (len(points),):
-            raise ValueError(f'{file_path}: expected {len(points)} predictions, got {predictions.shape}')
+        if predictions.shape != (len(retained_indices),):
+            raise ValueError(f'{file_path}: expected {len(retained_indices)} predictions, got {predictions.shape}')
         if predictions.size and (predictions.min() < 0 or predictions.max() >= segmenter.n_classes):
             raise ValueError(f'{file_path}: predictions outside model class range')
+        stored_targets = stored_targets[retained_indices]
         labeled_indices = np.flatnonzero(stored_targets > 0)
         if not labeled_indices.size:
             continue
@@ -283,7 +287,7 @@ def run_evaluation(args: argparse.Namespace) -> EvaluationMetrics:
             f"Exact mIoU: {metrics['miou']}\n"
             f"Exact IoU per class: {metrics['class_iou']}\n"
             "The precision/recall table above uses the bounded, "
-            "class-balanced report sample; headline metrics use all labeled points.")
+            "class-balanced report sample; headline metrics use all labeled voxel representatives.")
     ClassificationReport(file_path=paths['report_dir'] / f'classification_report_{args.model_name}.txt', pred=metrics['predictions'], target=metrics['targets'], additional_info=info)
     print(f"Processed files: {summary['processed_files']}")
     print(f"Labeled points: {summary['labeled_points']}")

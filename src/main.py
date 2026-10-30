@@ -180,13 +180,13 @@ def process_files(args) -> list[Path]:
             cloud = laspy.read(source_path)
             points = np.column_stack((cloud.x, cloud.y, cloud.z))
             intensity = np.asarray(cloud.intensity)
-            labels = np.asarray(
-                segmenter.segment_pcd(points, intensity),
-                dtype=np.int16,
+            labels, retained_indices = segmenter.segment_pcd(
+                points, intensity, return_indices=True,
             )
-            if labels.shape != (len(points),):
+            labels = np.asarray(labels, dtype=np.int16)
+            if labels.shape != (len(retained_indices),):
                 raise ValueError(
-                    f"Expected {len(points)} labels, got shape {labels.shape}"
+                    f"Expected {len(retained_indices)} labels, got shape {labels.shape}"
                 )
 
             labels += 1
@@ -196,6 +196,7 @@ def process_files(args) -> list[Path]:
                 )
 
             output_file.parent.mkdir(parents=True, exist_ok=True)
+            cloud.points = cloud.points[retained_indices].copy()
             cloud.classification = labels.astype(np.uint8)
             cloud.write(output_file)
             _append_processed_file(

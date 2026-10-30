@@ -380,35 +380,18 @@ class SegmentClass:
 
         return self._hard_vote(votes)
 
-    def _upsample_labels(
-        self,
-        subsampled_points: np.ndarray,
-        subsampled_labels: np.ndarray,
-        points: np.ndarray,
-    ) -> np.ndarray:
-        tree = cKDTree(subsampled_points, leafsize=40)
-        labels = np.empty(len(points), dtype=np.int8)
-        chunk_size = 1_000_000
-
-        starts = range(0, len(points), chunk_size)
-        if self.pbar_bool:
-            starts = tqdm(starts, desc="Label upsampling", unit="chunk", leave=False)
-
-        for start in starts:
-            end = min(start + chunk_size, len(points))
-            _, indices = tree.query(
-                points[start:end],
-                k=1,
-                workers=self.query_workers,
-            )
-            labels[start:end] = subsampled_labels[indices]
-        return labels
-
     def segment_pcd(
         self,
         points: np.ndarray,
         intensity: np.ndarray,
-    ) -> np.ndarray:
+        *,
+        return_indices: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+        """Predict labels for voxel representatives, without dense reprojection.
+
+        With return_indices=True, also return their indices into the input
+        arrays, in the same order as the labels.
+        """
         points = np.asarray(points)
         intensity = np.asarray(intensity).reshape(-1)
         if points.ndim != 2 or points.shape[1] != 3:
@@ -432,7 +415,7 @@ class SegmentClass:
             normalized_intensity.fill(0)
 
         source_indices = np.arange(len(points), dtype=np.int64)
-        subsampled_points, subsampled_features, _ = voxel_subsample_vectorized(
+        subsampled_points, subsampled_features, retained_indices = voxel_subsample_vectorized(
             normalized_points,
             normalized_intensity[:, None],
             source_indices,
@@ -444,8 +427,6 @@ class SegmentClass:
             subsampled_points,
             subsampled_intensity,
         )
-        return self._upsample_labels(
-            subsampled_points,
-            subsampled_labels,
-            normalized_points,
-        )
+        if return_indices:
+            return subsampled_labels, retained_indices
+        return subsampled_labels

@@ -20,8 +20,10 @@ class FixedSegmenter:
         self.kwargs = kwargs
         self.instances.append(self)
 
-    def segment_pcd(self, points, intensity):
-        return np.arange(len(points), dtype=np.int8) % 2
+    def segment_pcd(self, points, intensity, *, return_indices=False):
+        indices = np.arange(len(points) - 1, -1, -2)
+        labels = np.arange(len(indices), dtype=np.int8) % 2
+        return (labels, indices) if return_indices else labels
 
 
 def write_las(path: pathlib.Path, point_count: int = 4):
@@ -89,8 +91,11 @@ def test_single_file_creates_modified_copy_beside_source(tmp_path, monkeypatch):
     )
     np.testing.assert_array_equal(
         laspy.read(output_file).classification,
-        [1, 2, 1, 2],
+        [1, 2],
     )
+    output_cloud = laspy.read(output_file)
+    np.testing.assert_array_equal(output_cloud.x, [3, 1])
+    np.testing.assert_array_equal(output_cloud.intensity, [3, 1])
     assert main.PROCESSED_FILES_PATH.read_text(encoding="utf-8") == (
         f"{input_file.as_posix()} -> {output_file.as_posix()}\n"
     )

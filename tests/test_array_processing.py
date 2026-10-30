@@ -272,9 +272,11 @@ def test_tile_overlap_bound_covers_every_point(segmenter):
     assert occurrences.max() <= segmenter.max_overlaps
 
 
-def test_segment_pcd_returns_labels_for_original_dense_points(
+@pytest.mark.parametrize("return_indices", [False, True])
+def test_segment_pcd_returns_labels_for_voxel_representatives(
     segmenter,
     monkeypatch,
+    return_indices,
 ):
     points = np.array(
         [
@@ -305,9 +307,14 @@ def test_segment_pcd_returns_labels_for_original_dense_points(
 
     monkeypatch.setattr(segmenter, '_segment_subsampled', segment_subsampled)
 
-    labels = segmenter.segment_pcd(points, intensity)
+    result = segmenter.segment_pcd(points, intensity, return_indices=return_indices)
+    if return_indices:
+        labels, indices = result
+        np.testing.assert_array_equal(indices, [0, 2])
+    else:
+        labels = result
 
     np.testing.assert_allclose(captured['intensity'], [0.0, 0.5])
-    np.testing.assert_array_equal(labels, [1, 1, 0, 0])
+    np.testing.assert_array_equal(labels, [1, 0])
     np.testing.assert_array_equal(points, original_points)
     assert labels.dtype == np.int8

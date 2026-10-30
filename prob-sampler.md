@@ -461,7 +461,7 @@ Mode `1` loads `config_train_single.json` and
 `config_model_single.json`. Mode `2` runs the Optuna search configuration.
 The `data_path_test` field is not consumed by the mode-1 training loop.
 
-## 18. Dense raw-cloud inference
+## 18. Voxel-subsampled raw-cloud inference
 
 Final inference uses `SegmentClass` from `src/array_processing.py` and reads a
 complete raw cloud:
@@ -476,8 +476,8 @@ complete raw cloud:
 8. Accumulate softmax probabilities for every real point occurrence.
 9. Average probabilities within each inference tile.
 10. Resolve predictions from overlapping spatial tiles by label voting.
-11. Upsample subsampled labels to every original dense point using one-nearest
-    neighbor assignment.
+11. Return labels for the voxel representatives, optionally with their input
+    indices. Output files retain only these sparse points and their attributes.
 
 Unclassified raw points remain in the cloud during inference and can influence
 the geometric context seen by labeled points.
@@ -485,11 +485,11 @@ the geometric context seen by labeled points.
 ## 19. Raw LAS/LAZ evaluation
 
 `src/model_pipeline/EvalSegm_RandLANet.py` constructs `SegmentClass` and sends
-complete `.las` or `.laz` scans through the dense inference path. Final test
+complete `.las` or `.laz` scans through the voxel-subsampled inference path. Final test
 assessment does not use preprocessed test tiles.
 
-Predictions are produced for every raw point. Metrics use only points whose
-stored LAS classification is greater than zero. The evaluator accumulates an
+Predictions are produced for the retained voxel representatives. Metrics use
+only representatives whose stored LAS classification is greater than zero. The evaluator accumulates an
 exact confusion matrix over all such points and reports:
 
 - exact labeled-point accuracy;
