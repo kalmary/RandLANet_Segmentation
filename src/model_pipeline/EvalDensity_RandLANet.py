@@ -18,7 +18,7 @@ from src.array_processing import SegmentClass
 
 
 MODEL_NAME = "RandLANetDV0_2"
-VOXEL_SIZES = (0.1, 0.25, 0.5, 1.0)
+VOXEL_SIZES = (0.1, 0.25, 0.5, 1.0, 1.5)
 RAW_PATH = Path("/mnt/data-ssd/DALES/raw/dales_las/test")
 
 
