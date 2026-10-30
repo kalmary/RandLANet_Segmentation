@@ -1,0 +1,29 @@
+Model: RandLANetPDV2_2
+Voxel size: 1 m
+Raw points: 35763171
+Sparse input points: 2108761
+Returned predictions: 2107741
+Labeled evaluated points: 2074651
+Seed: 42
+Model labels are LAS classification minus one; class 0 is ignored.
+Files:
+/mnt/data-ssd/DALES/raw/dales_las/test/5080_54400.las
+/mnt/data-ssd/DALES/raw/dales_las/test/5080_54470.las
+/mnt/data-ssd/DALES/raw/dales_las/test/5100_54440.las
+
+              precision    recall  f1-score   support
+
+           0     0.8619    0.9025    0.8817  606286.0
+           1     0.7146    0.9564    0.8180  936055.0
+           2     0.1052    0.3064    0.1566   24230.0
+           3     0.0000    0.0000    0.0000    7832.0
+           4     0.1067    0.7266    0.1861   14834.0
+           5     0.6769    0.0037    0.0073   24090.0
+           6     0.7794    0.0334    0.0641    6347.0
+           7     0.5231    0.0172    0.0334  454977.0
+           8     0.0000    0.0000    0.0000       0.0
+           9     0.0000    0.0000    0.0000       0.0
+
+    accuracy                         0.7080 2074651.0
+   macro avg     0.3768    0.2946    0.2147 2074651.0
+weighted avg     0.7012    0.7080    0.6375 2074651.0
