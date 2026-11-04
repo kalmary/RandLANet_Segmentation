@@ -165,10 +165,10 @@ cython_debug/
 
 ##### project related
 
-benchmark_results/
+*results/
+*.pt
 
 **/logs/
-**/training_results/
 **/final_files/
 **/db.sqlite3
 *.json
