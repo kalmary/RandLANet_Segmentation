@@ -96,7 +96,7 @@ def test_full_loop_reports_each_size_and_resamples_original_cloud(
 
     original = np.column_stack((cloud.x, cloud.y, cloud.z))
     original -= original.mean(axis=0)
-    assert len(paths) == len(calls) == 4
+    assert len(paths) == len(calls) == len(density.VOXEL_SIZES)
     for size, received, path in zip(density.VOXEL_SIZES, calls, paths):
         indices = density.voxel_indices(original, size)
         np.testing.assert_array_equal(received, original[indices])
